@@ -1,44 +1,70 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/client";
+import { Popover, PopoverDivider, PopoverItem, type PopoverPlacement } from "./Popover";
 
-export function Menu({ trigger, children, align = "right", width = "w-56" }: { trigger: React.ReactNode; children: React.ReactNode; align?: "left" | "right"; width?: string }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
+/**
+ * Dropdown action menu (role="menu"): arrow keys, Home/End, typeahead, Esc, outside click, focus return.
+ *
+ *   <Menu trigger={<IconButton title="List actions"><MoreHorizontal size={16} /></IconButton>}>
+ *     <MenuItem icon={<Pencil size={16} />} onClick={rename}>Rename</MenuItem>
+ *     <MenuDivider />
+ *     <MenuItem danger icon={<Trash2 size={16} />} onClick={remove}>Delete</MenuItem>
+ *   </Menu>
+ */
+export function Menu({
+  trigger,
+  children,
+  align = "right",
+  width = "w-56",
+  title,
+  placement,
+  className,
+  ariaLabel,
+  open,
+  onOpenChange,
+}: {
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+  /** right = menu's right edge aligns with the trigger's right edge. */
+  align?: "left" | "right";
+  /** Tailwind width class (legacy, default w-56), a number of px, or "auto". */
+  width?: string | number;
+  /** Optional Trello-style header (centered title + close). */
+  title?: React.ReactNode;
+  placement?: PopoverPlacement;
+  className?: string;
+  ariaLabel?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const isClass = typeof width === "string" && /^[a-z-]*:?[a-z]*-/.test(width) && width !== "auto";
   return (
-    <div ref={ref} className="relative inline-block">
-      <div onClick={() => setOpen((o) => !o)}>{trigger}</div>
-      {open ? (
-        <div
-          className={cn("fade-in absolute z-40 mt-1 rounded-lg bg-white p-1.5 shadow-[var(--shadow-overlay)]", width, align === "right" ? "right-0" : "left-0")}
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      ) : null}
-    </div>
+    <Popover
+      role="menu"
+      trigger={trigger}
+      title={title}
+      ariaLabel={ariaLabel ?? (typeof title === "string" ? title : "Menu")}
+      open={open}
+      onOpenChange={onOpenChange}
+      placement={placement ?? (align === "right" ? "bottom-end" : "bottom-start")}
+      width={isClass ? "auto" : width}
+      className={cn(isClass && width, "min-w-[180px]", className)}
+      padded={false}
+      bodyClassName="py-1"
+    >
+      {children}
+    </Popover>
   );
 }
 
-export function MenuItem({ children, onClick, danger, icon }: { children: React.ReactNode; onClick?: () => void; danger?: boolean; icon?: React.ReactNode }) {
+export const MenuItem = PopoverItem;
+export const MenuDivider = PopoverDivider;
+/** Group label inside a menu. */
+export function MenuLabel({ children }: { children: React.ReactNode }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn("flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-[#091e420f]", danger ? "text-danger" : "text-ink")}
-    >
-      {icon}
+    <div role="presentation" className="px-3 pb-1 pt-2 text-h-xxs font-semibold text-ink-soft">
       {children}
-    </button>
+    </div>
   );
 }

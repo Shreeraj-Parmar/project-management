@@ -1,16 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlignLeft, CheckSquare, Tag, Clock, Flag, Columns3, Trash2, Plus, X, CheckCircle2, Circle } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import { api, cn, toDateInput, uid } from "@/lib/client";
-import { LABEL_COLORS, labelColor, PRIORITY_STYLE, TASK_PRIORITIES } from "@/lib/constants";
-import type { Column, Task } from "@/lib/types";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
-import { Input, Select, Textarea } from "@/components/ui/Field";
-import { useToast } from "@/components/ui/Toast";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "@/lib/client";
+import type { ChecklistItem, Column, Task } from "@/lib/types";
+import { ConfirmDialog, Modal, Popover, useToast } from "@/components/ui";
+import { ActivitySection } from "./modal/ActivitySection";
+import { ChecklistSection } from "./modal/ChecklistSection";
+import { DeleteChecklistConfirm, ChecklistQuickAdd } from "./modal/ChecklistPanels";
+import { DatesPanel } from "./modal/DatesPanel";
+import { DescriptionSection } from "./modal/DescriptionSection";
+import { LabelsPanel } from "./modal/LabelsPanel";
+import { AddMenu, MoveMenu, PriorityMenu } from "./modal/MenuPanels";
+import { MetaRow } from "./modal/MetaRow";
+import { QuickActions } from "./modal/QuickActions";
+import { Sidebar } from "./modal/Sidebar";
+import { TitleRow } from "./modal/TitleRow";
+import type { PopApi, PopKind, PopSource } from "./modal/types";
+import { useTaskPatch } from "./modal/useTaskPatch";
+import { uid } from "@/lib/client";
 
+type OpenPop = { kind: PopKind; anchor: HTMLElement; source: PopSource; hadLabels: boolean };
+
+const POP_TITLE: Record<PopKind, string> = {
+  add: "Add to card",
+  labels: "Labels",
+  dates: "Dates",
+  checklist: "Add checklist item",
+  priority: "Priority",
+  move: "Move card",
+  deleteChecklist: "Delete checklist?",
+};
+const MENU_KINDS: PopKind[] = ["add", "priority", "move"];
+
+/**
+ * Trello-style card back. Same props as before; the page that renders it needs no changes.
+ * Desktop: 768px, main column + 168px sidebar. Phones: full-screen single column.
+ */
 export function TaskModal({
   task,
   columns,
@@ -27,256 +52,279 @@ export function TaskModal({
   onDelete: (id: string) => void;
 }) {
   const { toast } = useToast();
-  const [title, setTitle] = useState(task.title);
-  const [desc, setDesc] = useState(task.description);
-  const [editingDesc, setEditingDesc] = useState(!task.description);
-  const [newItem, setNewItem] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { patch, status, taskRef } = useTaskPatch({ task, projectId, onChange });
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setTitle(task.title);
-    setDesc(task.description);
-  }, [task._id, task.title, task.description]);
+  // ---- popovers: one at a time, anchored to whichever button opened them
+  const [pop, setPop] = useState<OpenPop | null>(null);
+  const popRef = useRef<OpenPop | null>(null);
+  popRef.current = pop;
 
-  async function patch(update: Partial<Task>) {
-    const optimistic = { ...task, ...update } as Task;
-    onChange(optimistic);
-    try {
-      const saved = await api.patch<Task>(`/api/projects/${projectId}/tasks/${task._id}`, update);
-      onChange(saved);
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to save", "error");
-      onChange(task);
+  const closePop = useCallback(() => {
+    const a = popRef.current?.anchor;
+    setPop(null);
+    // Give focus back to the opener unless the user already moved it somewhere else.
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (a?.isConnected && (!active || active === document.body)) a.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const popApi = useMemo<PopApi>(
+    () => ({
+      open: (kind, anchor, source) =>
+        setPop((p) => (p && p.kind === kind && p.source === source ? null : { kind, anchor, source, hadLabels: taskRef.current.labels.length > 0 })),
+      isOpen: (kind, source) => !!pop && pop.kind === kind && pop.source === source,
+    }),
+    [pop, taskRef]
+  );
+
+  // ---- description draft (kept here so closing the card can save it)
+  const [descEditing, setDescEditing] = useState(false);
+  const [descDraft, setDescDraft] = useState<string | null>(null);
+  const [descSaving, setDescSaving] = useState(false);
+  const descDirty = descDraft !== null && descDraft !== task.description;
+  const descRef = useRef({ draft: descDraft, saved: task.description });
+  descRef.current = { draft: descDraft, saved: task.description };
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function saveDescription() {
+    const text = descRef.current.draft;
+    if (text === null) {
+      setDescEditing(false);
+      return;
+    }
+    if (text === descRef.current.saved) {
+      setDescEditing(false);
+      setDescDraft(null);
+      return;
+    }
+    setDescSaving(true);
+    setDescEditing(false);
+    setDescDraft(null);
+    const ok = await patch({ description: text });
+    setDescSaving(false);
+    if (!ok) {
+      // Never lose what the user typed: put it back in the editor.
+      setDescDraft(text);
+      setDescEditing(true);
     }
   }
 
-  function toggleLabel(id: string) {
-    const labels = task.labels.includes(id) ? task.labels.filter((l) => l !== id) : [...task.labels, id];
-    patch({ labels });
+  // Warn before the tab itself is closed with an unsaved description.
+  useEffect(() => {
+    if (!descDirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [descDirty]);
+
+  // ---- closing: a click on the blanket that only dismissed a popover must not also close the card;
+  // unsaved description text is saved instead of being lost.
+  const lastPointer = useRef<{ onBlanket: boolean; popOpen: boolean; t: number } | null>(null);
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as Element | null;
+      const dialog = rootRef.current?.closest('[role="dialog"]');
+      const onBlanket = !!el && !!dialog && !dialog.contains(el) && !el.closest(".popover-surface");
+      lastPointer.current = { onBlanket, popOpen: popRef.current !== null, t: performance.now() };
+    };
+    const onKey = () => {
+      lastPointer.current = null;
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
+  const handleClose = useCallback(() => {
+    const last = lastPointer.current;
+    if (last && last.onBlanket && last.popOpen && performance.now() - last.t < 600) {
+      lastPointer.current = null;
+      return;
+    }
+    const { draft, saved } = descRef.current;
+    if (draft !== null && draft !== saved) {
+      void patch({ description: draft }).then((ok) => {
+        if (ok) toast("Description saved.", "success");
+      });
+    }
+    onClose();
+  }, [onClose, patch, toast]);
+
+  // ---- actions
+  const setComplete = useCallback((done: boolean) => void patch({ completedAt: done ? new Date().toISOString() : null }), [patch]);
+  const toggleLabel = useCallback(
+    (id: string) => {
+      const cur = taskRef.current.labels;
+      void patch({ labels: cur.includes(id) ? cur.filter((l) => l !== id) : [...cur, id] });
+    },
+    [patch, taskRef]
+  );
+  const setChecklist = useCallback((next: ChecklistItem[]) => void patch({ checklist: next }), [patch]);
+  const addChecklistItems = useCallback(
+    (texts: string[]) => void patch({ checklist: [...taskRef.current.checklist, ...texts.map((text) => ({ id: uid(), text, done: false }))] }),
+    [patch, taskRef]
+  );
+
+  async function deleteCard() {
+    try {
+      await api.del(`/api/projects/${projectId}/tasks/${task._id}`);
+    } catch (err) {
+      toast(err instanceof Error && err.message ? `Couldn't delete the card. ${err.message}` : "Couldn't delete the card. Try again.", "error");
+      return;
+    }
+    onDelete(task._id);
+    onClose();
+    toast("Card deleted.", "success");
   }
 
-  const checked = task.checklist.filter((c) => c.done).length;
-  const pct = task.checklist.length ? Math.round((checked / task.checklist.length) * 100) : 0;
   const column = columns.find((c) => c.id === task.columnId);
+  // Keep the Labels group mounted while its popover is open (it may be the anchor), but never create an empty one just for opening.
+  const showLabels = task.labels.length > 0 || (pop?.kind === "labels" && pop.hadLabels);
+  const isMenu = pop ? MENU_KINDS.includes(pop.kind) : false;
 
   return (
-    <Modal open onClose={onClose} title={<span className="text-ink-muted">in list <b className="text-ink">{column?.title}</b></span>} width="max-w-3xl" accent="#1f845a">
-      <div className="grid gap-6 md:grid-cols-[1fr_200px]">
-        <div className="min-w-0 space-y-5">
-          {/* Title */}
-          <div className="flex items-start gap-2">
-            <button
-              onClick={() => patch({ completedAt: task.completedAt ? null : new Date().toISOString() })}
-              className={cn("mt-1 shrink-0", task.completedAt ? "text-success" : "text-ink-muted hover:text-ink")}
-              title={task.completedAt ? "Mark incomplete" : "Mark complete"}
-            >
-              {task.completedAt ? <CheckCircle2 size={22} /> : <Circle size={22} />}
-            </button>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => title.trim() && title !== task.title && patch({ title: title.trim() })}
-              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-              className={cn("w-full rounded px-2 py-1 text-lg font-semibold text-ink outline-none hover:bg-[#091e420f] focus:bg-white focus:ring-2 focus:ring-brand", task.completedAt && "line-through text-ink-muted")}
-            />
-          </div>
+    <>
+      <Modal
+        open
+        onClose={handleClose}
+        title={`Card: ${task.title}`}
+        hideHeader
+        flush
+        scrim="strong"
+        width="max-w-[768px]"
+        className="max-sm:-m-4 max-sm:h-dvh max-sm:max-h-none max-sm:w-[calc(100%+2rem)] max-sm:max-w-none max-sm:rounded-none"
+      >
+        <div ref={rootRef} data-autofocus tabIndex={-1} className="min-h-full bg-list text-ink outline-none">
+          <TitleRow
+            task={task}
+            column={column}
+            status={status}
+            pop={popApi}
+            onTitle={(title) => void patch({ title })}
+            onComplete={setComplete}
+          />
 
-          {/* Meta chips */}
-          <div className="flex flex-wrap gap-4 pl-8 text-xs">
-            {task.labels.length > 0 ? (
-              <div>
-                <div className="mb-1 font-semibold text-ink-muted">Labels</div>
-                <div className="flex flex-wrap gap-1">
-                  {task.labels.map((l) => {
-                    const c = labelColor(l);
-                    return (
-                      <span key={l} className="rounded px-2 py-0.5 text-[11px] font-semibold" style={{ background: c.bg, color: c.fg }}>
-                        {c.label}
-                      </span>
-                    );
-                  })}
+          <div className="md:flex md:items-start">
+            <main className="min-w-0 flex-1 px-4 pb-6 md:pb-8 md:pr-2">
+              <div className="pl-8 md:pl-10">
+                <div className="mt-3">
+                  <QuickActions pop={popApi} />
                 </div>
+                <MetaRow task={task} pop={popApi} showLabels={showLabels} onComplete={setComplete} />
               </div>
-            ) : null}
-            <div>
-              <div className="mb-1 font-semibold text-ink-muted">Priority</div>
-              <span className="rounded px-2 py-0.5 text-[11px] font-semibold capitalize" style={{ background: PRIORITY_STYLE[task.priority].bg, color: PRIORITY_STYLE[task.priority].fg }}>
-                {task.priority}
-              </span>
-            </div>
-            {task.dueDate ? (
-              <div>
-                <div className="mb-1 font-semibold text-ink-muted">Due date</div>
-                <span className="rounded bg-[#f1f2f4] px-2 py-0.5 text-[11px] font-semibold text-ink">{new Date(task.dueDate).toLocaleDateString()}</span>
-              </div>
-            ) : null}
-          </div>
 
-          {/* Description */}
-          <section>
-            <h4 className="mb-2 flex items-center gap-2 text-sm font-bold text-ink">
-              <AlignLeft size={16} /> Description
-            </h4>
-            {editingDesc ? (
-              <div className="pl-6">
-                <Textarea autoFocus value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Add a more detailed description… (markdown supported)" className="min-h-[120px]" />
-                <div className="mt-2 flex gap-2">
-                  <Button
-                    size="sm"
-                    color="#1f845a"
-                    onClick={async () => {
-                      await patch({ description: desc });
-                      setEditingDesc(false);
-                    }}
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setDesc(task.description);
-                      setEditingDesc(Boolean(!task.description));
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div onClick={() => setEditingDesc(true)} className="prose-note cursor-text rounded-md bg-[#091e420f] p-3 pl-3 hover:bg-[#091e4224]">
-                <ReactMarkdown>{task.description}</ReactMarkdown>
-              </div>
-            )}
-          </section>
-
-          {/* Checklist */}
-          <section>
-            <h4 className="mb-2 flex items-center gap-2 text-sm font-bold text-ink">
-              <CheckSquare size={16} /> Checklist
-            </h4>
-            <div className="pl-6">
-              {task.checklist.length > 0 ? (
-                <div className="mb-2 flex items-center gap-2 text-xs text-ink-muted">
-                  <span className="w-8">{pct}%</span>
-                  <div className="h-1.5 flex-1 overflow-hidden rounded bg-[#091e4224]">
-                    <div className="h-full rounded transition-all" style={{ width: `${pct}%`, background: pct === 100 ? "#1f845a" : "#579dff" }} />
-                  </div>
-                </div>
-              ) : null}
-              <ul className="space-y-1">
-                {task.checklist.map((item) => (
-                  <li key={item.id} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-[#091e420f]">
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={() => patch({ checklist: task.checklist.map((c) => (c.id === item.id ? { ...c, done: !c.done } : c)) })}
-                      className="h-4 w-4 accent-[#1f845a]"
-                    />
-                    <span className={cn("flex-1 text-sm", item.done && "line-through text-ink-muted")}>{item.text}</span>
-                    <button onClick={() => patch({ checklist: task.checklist.filter((c) => c.id !== item.id) })} className="opacity-0 group-hover:opacity-100">
-                      <X size={14} className="text-ink-muted hover:text-danger" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!newItem.trim()) return;
-                  patch({ checklist: [...task.checklist, { id: uid(), text: newItem.trim(), done: false }] });
-                  setNewItem("");
-                }}
-                className="mt-2 flex gap-2"
-              >
-                <Input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="Add an item" className="h-8 py-1" />
-                <Button type="submit" size="sm" variant="secondary" icon={<Plus size={14} />} disabled={!newItem.trim()}>
-                  Add
-                </Button>
-              </form>
-            </div>
-          </section>
-        </div>
-
-        {/* Sidebar */}
-        <aside className="space-y-4 text-xs">
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 font-bold text-ink-muted">
-              <Columns3 size={13} /> List
-            </div>
-            <Select value={task.columnId} onChange={(e) => patch({ columnId: e.target.value })} className="h-8 py-1 text-[13px]">
-              {columns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 font-bold text-ink-muted">
-              <Flag size={13} /> Priority
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              {TASK_PRIORITIES.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => patch({ priority: p })}
-                  className={cn("rounded px-2 py-1 text-[12px] font-semibold capitalize ring-brand", task.priority === p && "ring-2")}
-                  style={{ background: PRIORITY_STYLE[p].bg, color: PRIORITY_STYLE[p].fg }}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 font-bold text-ink-muted">
-              <Tag size={13} /> Labels
-            </div>
-            <div className="grid grid-cols-5 gap-1">
-              {LABEL_COLORS.map((c) => (
-                <button
-                  key={c.id}
-                  title={c.label}
-                  onClick={() => toggleLabel(c.id)}
-                  className={cn("h-7 rounded ring-ink ring-offset-1", task.labels.includes(c.id) && "ring-2")}
-                  style={{ background: c.bg }}
+              <div className="pl-8 md:pl-10">
+                <DescriptionSection
+                  description={task.description}
+                  editing={descEditing}
+                  draft={descDraft}
+                  saving={descSaving}
+                  onStartEdit={() => {
+                    setDescDraft((d) => d ?? task.description);
+                    setDescEditing(true);
+                  }}
+                  onResume={() => setDescEditing(true)}
+                  onDraftChange={setDescDraft}
+                  onSave={() => void saveDescription()}
+                  onCancel={() => {
+                    setDescEditing(false);
+                    setDescDraft(null);
+                  }}
+                  onEscape={() => {
+                    // Clean text: just close the editor. Dirty text: keep it and show the unsaved bar.
+                    setDescEditing(false);
+                    if (descRef.current.draft === descRef.current.saved) setDescDraft(null);
+                  }}
                 />
-              ))}
-            </div>
+
+                {task.checklist.length > 0 ? <ChecklistSection items={task.checklist} onChange={setChecklist} pop={popApi} /> : null}
+
+                <ActivitySection task={task} />
+              </div>
+            </main>
+
+            <Sidebar pop={popApi} completed={Boolean(task.completedAt)} onComplete={setComplete} onDelete={() => setConfirmDelete(true)} />
           </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 font-bold text-ink-muted">
-              <Clock size={13} /> Due date
-            </div>
-            <Input type="date" value={toDateInput(task.dueDate)} onChange={(e) => patch({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })} className="h-8 py-1 text-[13px]" />
-          </div>
-          <div className="border-t border-line pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start text-danger hover:bg-[#ffeceb]"
-              icon={<Trash2 size={14} />}
-              loading={busy}
-              onClick={async () => {
-                if (!confirm("Delete this task?")) return;
-                setBusy(true);
-                try {
-                  await api.del(`/api/projects/${projectId}/tasks/${task._id}`);
-                  onDelete(task._id);
-                  onClose();
-                } catch (err) {
-                  toast(err instanceof Error ? err.message : "Failed", "error");
-                } finally {
-                  setBusy(false);
-                }
+        </div>
+      </Modal>
+
+      {pop ? (
+        <Popover
+          key={pop.kind}
+          open
+          anchor={pop.anchor}
+          onOpenChange={(o) => {
+            if (!o) closePop();
+          }}
+          title={POP_TITLE[pop.kind]}
+          role={isMenu ? "menu" : "dialog"}
+          padded={!isMenu}
+          bodyClassName={isMenu ? "pb-2" : undefined}
+          mobileSheet
+          restoreFocus={false}
+          className="!z-[600]"
+        >
+          {pop.kind === "add" ? <AddMenu onPick={(k) => setPop({ ...pop, kind: k })} /> : null}
+          {pop.kind === "labels" ? <LabelsPanel selected={task.labels} onToggle={toggleLabel} /> : null}
+          {pop.kind === "dates" ? (
+            <DatesPanel
+              dueDate={task.dueDate}
+              onSave={(iso) => {
+                void patch({ dueDate: iso });
+                closePop();
               }}
-            >
-              Delete task
-            </Button>
-          </div>
-        </aside>
-      </div>
-    </Modal>
+              onRemove={() => {
+                void patch({ dueDate: null });
+                closePop();
+              }}
+            />
+          ) : null}
+          {pop.kind === "checklist" ? <ChecklistQuickAdd count={task.checklist.length} onAdd={addChecklistItems} /> : null}
+          {pop.kind === "priority" ? (
+            <PriorityMenu
+              value={task.priority}
+              onPick={(p) => {
+                if (p !== task.priority) void patch({ priority: p });
+              }}
+            />
+          ) : null}
+          {pop.kind === "move" ? (
+            <MoveMenu
+              columns={columns}
+              currentId={task.columnId}
+              onPick={(id) => {
+                if (id !== task.columnId) void patch({ columnId: id });
+              }}
+            />
+          ) : null}
+          {pop.kind === "deleteChecklist" ? (
+            <DeleteChecklistConfirm
+              onConfirm={() => {
+                void patch({ checklist: [] });
+                closePop();
+              }}
+            />
+          ) : null}
+        </Popover>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={deleteCard}
+        title={`Delete card "${task.title.length > 48 ? `${task.title.slice(0, 48)}...` : task.title}"?`}
+        message="This permanently deletes the card with its description, labels and checklist. There is no undo."
+        confirmLabel="Delete card"
+      />
+    </>
   );
 }

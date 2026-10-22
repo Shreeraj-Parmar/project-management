@@ -12,6 +12,7 @@ export function TagInput({
   max = 20,
   className,
   id,
+  ...aria
 }: {
   value: string[];
   onChange: (tags: string[]) => void;
@@ -19,6 +20,8 @@ export function TagInput({
   max?: number;
   className?: string;
   id?: string;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -39,11 +42,12 @@ export function TagInput({
 
   return (
     <div
-      className={cn("t-input flex min-h-[38px] cursor-text flex-wrap items-center gap-1.5 py-1.5 focus-within:border-brand focus-within:shadow-[0_0_0_1px_var(--color-brand)]", className)}
+      className={cn("t-input t-input--wrap flex-wrap", className)}
+      aria-invalid={aria["aria-invalid"] || undefined}
       onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}
     >
       {value.map((t) => (
-        <span key={t} className="inline-flex items-center gap-1 rounded bg-[#091e420f] px-2 py-0.5 text-[12px] font-semibold text-ink-soft">
+        <span key={t} className="inline-flex h-6 items-center gap-1 rounded-control bg-fill pl-2 pr-1 text-body-sm font-semibold text-ink-soft">
           {t}
           <button
             type="button"
@@ -52,7 +56,7 @@ export function TagInput({
               e.stopPropagation();
               onChange(value.filter((x) => x !== t));
             }}
-            className="rounded text-ink-muted hover:bg-[#091e4224] hover:text-ink"
+            className="flex h-4 w-4 items-center justify-center rounded-sm text-ink-soft hover:bg-fill-hover hover:text-ink"
           >
             <X size={12} />
           </button>
@@ -60,6 +64,7 @@ export function TagInput({
       ))}
       <input
         id={id}
+        aria-describedby={aria["aria-describedby"]}
         value={draft}
         onChange={(e) => {
           if (e.target.value.includes(",")) commit(e.target.value);
@@ -75,7 +80,7 @@ export function TagInput({
         }}
         onBlur={() => commit(draft)}
         placeholder={value.length ? "" : placeholder}
-        className="min-w-[120px] flex-1 border-0 bg-transparent p-0 text-sm text-ink outline-none placeholder:text-[#8590a2]"
+        className="min-w-[120px] flex-1 border-0 bg-transparent p-0 text-body text-ink outline-none"
       />
     </div>
   );

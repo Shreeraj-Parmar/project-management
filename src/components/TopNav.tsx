@@ -1,90 +1,146 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
-import { LayoutGrid, LogOut, Plus, Search, Home } from "lucide-react";
-import { api, cn } from "@/lib/client";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Search } from "lucide-react";
+import { cn } from "@/lib/client";
+import { Button, IconButton, Logo } from "@/components/ui";
 import { CreateBoardModal } from "./CreateBoardModal";
+import { recordBoardVisit } from "./home/recent";
+import { AccountMenu } from "./nav/AccountMenu";
+import { GlobalSearch } from "./nav/GlobalSearch";
+import { HeaderNav, type Tone } from "./nav/HeaderMenus";
+import { HelpPopover } from "./nav/HelpPopover";
+import { NotificationsMenu } from "./nav/Notifications";
+import { boardsResource, dashboardResource } from "./nav/store";
+
+const isTyping = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+const visible = (el: HTMLElement | null) => !!el && el.getClientRects().length > 0;
 
 /**
- * Global header. On the home page it is a light bar (like Trello's current design);
- * inside a board it becomes a translucent dark overlay on top of the board background.
+ * Global header (48px). On the boards home it is a white bar with a hairline (Trello's current design); inside a board
+ * `transparent` turns it into a translucent dark glass bar with white text.
+ * Left: logo, Workspaces / Recent / Starred / Templates (More on tablets), blue Create. Right: live search, notifications,
+ * help and the account menu. Phones: logo, Create (+), search icon, bell and avatar.
  */
 export function TopNav({ transparent = false, onSearch }: { transparent?: boolean; onSearch?: (q: string) => void }) {
-  const router = useRouter();
+  const tone: Tone = transparent ? "glass" : "light";
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+  const createRef = useRef<HTMLButtonElement>(null);
+  const createRefPhone = useRef<HTMLButtonElement>(null);
+  const [createAnchor, setCreateAnchor] = useState<HTMLElement | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [template, setTemplate] = useState<string | undefined>();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [mobileSearch, setMobileSearch] = useState(false);
 
-  async function logout() {
-    await api.post("/api/auth/logout");
-    router.replace("/login");
-    router.refresh();
+  // Opening a board (any /boards/<id>/... route) counts as a visit: feeds "Recent" here and on the home page.
+  useEffect(() => {
+    const m = /^\/boards\/([^/]+)/.exec(pathname ?? "");
+    if (m) recordBoardVisit(decodeURIComponent(m[1]));
+  }, [pathname]);
+
+  // Warm the shared caches: the bell badge needs the dashboard, search and menus need the boards.
+  useEffect(() => {
+    boardsResource.ensure(15_000);
+    dashboardResource.ensure(15_000);
+  }, [pathname]);
+
+  // Phone search closes when the viewport grows back to tablet width.
+  useEffect(() => {
+    if (!mobileSearch) return;
+    const mq = window.matchMedia("(min-width: 640px)");
+    const on = () => mq.matches && setMobileSearch(false);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [mobileSearch]);
+
+  // "/" focuses search, "?" opens help (never while typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+      if (e.key === "/") {
+        const input = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-global-search]")).find(visible);
+        e.preventDefault();
+        if (input) input.focus();
+        else setMobileSearch(true);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  function openCreate(tpl?: string) {
+    const el = [createRef.current, createRefPhone.current].find(visible) ?? null;
+    setTemplate(tpl);
+    setCreateAnchor(el);
+    setCreateOpen(true);
   }
-
-  const onHome = pathname === "/boards";
-  const navItem = (active: boolean) =>
-    cn(
-      "flex h-8 items-center gap-1.5 rounded px-2.5 text-sm font-medium transition",
-      transparent ? "text-white hover:bg-white/20" : active ? "bg-brand-soft text-brand-dark" : "text-ink-soft hover:bg-[#091e420f] hover:text-ink"
-    );
 
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-12 items-center gap-1.5 px-3",
-        transparent ? "bg-[#0000003d] text-white backdrop-blur-sm" : "border-b border-line bg-white text-ink"
+        "sticky top-0 z-[var(--z-header)] flex h-12 shrink-0 items-center gap-1 px-3",
+        transparent ? "glass-bar" : "border-b border-line bg-canvas text-ink"
       )}
     >
-      <Link href="/boards" className={cn("flex items-center gap-2 rounded px-2 py-1 font-bold tracking-tight", transparent ? "hover:bg-white/20" : "hover:bg-[#091e420f]")}>
-        <svg viewBox="0 0 64 64" className="h-6 w-6" aria-hidden>
-          <rect width="64" height="64" rx="12" fill={transparent ? "#fff" : "#0c66e4"} />
-          <rect x="12" y="12" width="17" height="40" rx="3" fill={transparent ? "#0c66e4" : "#fff"} />
-          <rect x="35" y="12" width="17" height="26" rx="3" fill={transparent ? "#0c66e4" : "#fff"} />
-        </svg>
-        <span className="text-[17px]">DevBoard</span>
-      </Link>
-      <nav className="ml-1 hidden items-center gap-0.5 sm:flex">
-        <Link href="/boards" className={navItem(onHome)}>
-          <Home size={15} /> Home
-        </Link>
-        <Link href="/boards#boards" className={navItem(false)}>
-          <LayoutGrid size={15} /> Boards
-        </Link>
-      </nav>
-      <button
-        onClick={() => setOpen(true)}
-        className={cn(
-          "ml-1 flex h-8 items-center gap-1 rounded px-3 text-sm font-semibold transition",
-          transparent ? "bg-white/20 text-white hover:bg-white/30" : "bg-brand text-white hover:bg-brand-dark"
-        )}
-      >
-        <Plus size={16} /> <span className="hidden sm:inline">Create</span>
-      </button>
+      {/* Phone: the search takes over the whole bar */}
+      {mobileSearch ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:hidden">
+          <GlobalSearch tone={tone} onSearch={onSearch} overlay onDone={() => setMobileSearch(false)} />
+          <Button variant={transparent ? "transparent" : "subtle"} onClick={() => setMobileSearch(false)}>
+            Cancel
+          </Button>
+        </div>
+      ) : null}
 
-      <div className="ml-auto flex items-center gap-1.5">
-        {onSearch ? (
-          <div className="relative hidden md:block">
-            <Search size={14} className={cn("pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2", transparent ? "text-white/80" : "text-ink-muted")} />
-            <input
-              type="search"
-              onChange={(e) => onSearch(e.target.value)}
-              placeholder="Search boards"
-              aria-label="Search boards"
-              className={cn(
-                "h-8 w-56 rounded border pl-8 pr-2 text-sm outline-none transition",
-                transparent
-                  ? "border-white/40 bg-white/15 text-white placeholder-white/70 focus:border-white focus:bg-white/25"
-                  : "border-line bg-white text-ink placeholder:text-ink-muted focus:border-brand focus:shadow-[0_0_0_1px_var(--color-brand)]"
-              )}
-            />
-          </div>
-        ) : null}
-        <button onClick={logout} title="Lock workspace" className={navItem(false)}>
-          <LogOut size={15} /> <span className="hidden sm:inline">Lock</span>
-        </button>
+      <div className={cn("flex min-w-0 flex-1 items-center gap-1", mobileSearch && "max-sm:hidden")}>
+        <Link href="/boards" aria-label="DevBoard home" className={cn("mr-1 flex h-8 items-center rounded-control px-1.5", transparent ? "hover:bg-on-board-ghost-hover" : "hover:bg-fill")}>
+          <span className="hidden sm:inline-flex">
+            <Logo size={24} variant={transparent ? "white" : "color"} />
+          </span>
+          <span className="inline-flex sm:hidden">
+            <Logo size={24} variant={transparent ? "white" : "color"} showWordmark={false} />
+          </span>
+        </Link>
+
+        <HeaderNav tone={tone} onPickTemplate={(id) => openCreate(id)} />
+
+        <Button ref={createRef} variant={transparent ? "glass" : "primary"} onClick={() => (createOpen ? setCreateOpen(false) : openCreate())} className="ml-1 hidden sm:inline-flex">
+          Create
+        </Button>
+        <IconButton
+          ref={createRefPhone}
+          title="Create"
+          variant={transparent ? "glass" : "primary"}
+          onClick={() => (createOpen ? setCreateOpen(false) : openCreate())}
+          className="ml-1 text-white sm:hidden"
+        >
+          <Plus size={16} aria-hidden />
+        </IconButton>
+
+        <div className="ml-auto flex items-center gap-1">
+          <GlobalSearch tone={tone} onSearch={onSearch} />
+          <IconButton title="Search" variant={transparent ? "transparent" : "subtle"} onClick={() => setMobileSearch(true)} className="sm:hidden">
+            <Search size={16} aria-hidden />
+          </IconButton>
+          <NotificationsMenu tone={tone} />
+          <HelpPopover tone={tone} open={helpOpen} onOpenChange={setHelpOpen} />
+          <AccountMenu tone={tone} />
+        </div>
       </div>
-      <CreateBoardModal open={open} onClose={() => setOpen(false)} />
+
+      <CreateBoardModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        anchor={createAnchor}
+        initialTemplate={template}
+        onCreated={() => void boardsResource.refetch(true)}
+      />
     </header>
   );
 }

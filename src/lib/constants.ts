@@ -16,18 +16,28 @@ export function boardBackground(id: string): string {
   return BOARD_COLORS.find((c) => c.id === id)?.css ?? BOARD_COLORS[0].css;
 }
 
-/** Trello label colors used for task labels & list headers. */
-export const LABEL_COLORS: { id: string; bg: string; fg: string; label: string }[] = [
-  { id: "green", bg: "#4bce97", fg: "#164b35", label: "Green" },
-  { id: "yellow", bg: "#f5cd47", fg: "#533f04", label: "Yellow" },
-  { id: "orange", bg: "#fea362", fg: "#5f3811", label: "Orange" },
-  { id: "red", bg: "#f87168", fg: "#601e16", label: "Red" },
-  { id: "purple", bg: "#9f8fef", fg: "#352c63", label: "Purple" },
-  { id: "blue", bg: "#579dff", fg: "#09326c", label: "Blue" },
-  { id: "sky", bg: "#6cc3e0", fg: "#164555", label: "Sky" },
-  { id: "lime", bg: "#94c748", fg: "#37471f", label: "Lime" },
-  { id: "pink", bg: "#e774bb", fg: "#50253f", label: "Pink" },
-  { id: "black", bg: "#8590a2", fg: "#091e42", label: "Gray" },
+/**
+ * Trello label colours (default tier). `bg` / `fg` is the card-face tier; `subtle` (light) and `bold` (saturated)
+ * are the optional picker tiers. Every fg has >= 4.5:1 contrast on its bg.
+ */
+export const LABEL_COLORS: {
+  id: string;
+  bg: string;
+  fg: string;
+  label: string;
+  subtle: { bg: string; fg: string };
+  bold: { bg: string; fg: string };
+}[] = [
+  { id: "green", bg: "#4bce97", fg: "#164b35", label: "Green", subtle: { bg: "#baf3db", fg: "#164b35" }, bold: { bg: "#1f845a", fg: "#ffffff" } },
+  { id: "yellow", bg: "#f5cd47", fg: "#533f04", label: "Yellow", subtle: { bg: "#f8e6a0", fg: "#533f04" }, bold: { bg: "#946f00", fg: "#ffffff" } },
+  { id: "orange", bg: "#fea362", fg: "#5f3811", label: "Orange", subtle: { bg: "#ffe2bd", fg: "#5f3811" }, bold: { bg: "#c25100", fg: "#ffffff" } },
+  { id: "red", bg: "#f87168", fg: "#5d1f1a", label: "Red", subtle: { bg: "#ffd5d2", fg: "#5d1f1a" }, bold: { bg: "#c9372c", fg: "#ffffff" } },
+  { id: "purple", bg: "#9f8fef", fg: "#352c63", label: "Purple", subtle: { bg: "#dfd8fd", fg: "#352c63" }, bold: { bg: "#6e5dc6", fg: "#ffffff" } },
+  { id: "blue", bg: "#579dff", fg: "#09326c", label: "Blue", subtle: { bg: "#cce0ff", fg: "#09326c" }, bold: { bg: "#0c66e4", fg: "#ffffff" } },
+  { id: "sky", bg: "#6cc3e0", fg: "#164555", label: "Sky", subtle: { bg: "#c6edfb", fg: "#164555" }, bold: { bg: "#227d9b", fg: "#ffffff" } },
+  { id: "lime", bg: "#94c748", fg: "#37471f", label: "Lime", subtle: { bg: "#d3f1a7", fg: "#37471f" }, bold: { bg: "#5b7f24", fg: "#ffffff" } },
+  { id: "pink", bg: "#e774bb", fg: "#50253f", label: "Pink", subtle: { bg: "#fdd0ec", fg: "#50253f" }, bold: { bg: "#ae4787", fg: "#ffffff" } },
+  { id: "black", bg: "#8590a2", fg: "#091e42", label: "Gray", subtle: { bg: "#dcdfe4", fg: "#091e42" }, bold: { bg: "#44546f", fg: "#ffffff" } },
 ];
 
 export function labelColor(id: string) {
