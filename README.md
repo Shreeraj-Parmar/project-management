@@ -3,6 +3,17 @@
 A personal, single-user project management workspace for developers, with a Trello-style UI.
 One password unlocks everything – no accounts, no sign-ups.
 
+## What is a board?
+
+A **board is one project** (the same idea as a Trello board or a monday.com board). You create one board per
+project – e.g. "Portfolio site", "Client API", "Side project" – and everything that belongs to that project
+lives inside it. The home page lists all your boards (starred, recently active, all / archived) and a
+workspace overview with open tasks, spending and stored secrets across every board.
+
+When you create a board you pick a background color, a title and a list template (Kanban, Simple,
+Software dev or Bug tracking) that decides which lists the Tasks page starts with. Lists can be
+renamed, added or removed later.
+
 Each board (project) has its own color-coded modules:
 
 | Module | What it stores |

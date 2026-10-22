@@ -89,12 +89,20 @@ textarea {
   border-radius: 4px;
   padding: 8px 12px;
   background: #fff;
+  color: var(--color-ink);
   outline: none;
   transition: border-color 120ms, box-shadow 120ms;
+}
+.t-input::placeholder {
+  color: #8590a2;
 }
 .t-input:focus {
   border-color: var(--color-brand);
   box-shadow: 0 0 0 1px var(--color-brand);
+}
+.t-input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
 }
 .t-input:disabled {
   background: #f1f2f4;

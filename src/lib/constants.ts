@@ -76,3 +76,59 @@ export const PRIORITY_STYLE: Record<TaskPriority, { bg: string; fg: string }> = 
   high: { bg: "#fff3eb", fg: "#5f3811" },
   urgent: { bg: "#ffeceb", fg: "#601e16" },
 };
+
+/**
+ * Board templates (Trello-style "start with a template").
+ * A template only decides which lists (columns) a new board starts with.
+ */
+export const BOARD_TEMPLATES: {
+  id: string;
+  label: string;
+  description: string;
+  columns: { id: string; title: string; color: string }[];
+}[] = [
+  {
+    id: "kanban",
+    label: "Kanban",
+    description: "To Do → In Progress → Review → Done",
+    columns: [
+      { id: "todo", title: "To Do", color: "blue" },
+      { id: "doing", title: "In Progress", color: "yellow" },
+      { id: "review", title: "Review", color: "purple" },
+      { id: "done", title: "Done", color: "green" },
+    ],
+  },
+  {
+    id: "simple",
+    label: "Simple",
+    description: "To Do → Doing → Done",
+    columns: [
+      { id: "todo", title: "To Do", color: "blue" },
+      { id: "doing", title: "Doing", color: "yellow" },
+      { id: "done", title: "Done", color: "green" },
+    ],
+  },
+  {
+    id: "software",
+    label: "Software dev",
+    description: "Backlog → Design → Dev → Testing → Deployed",
+    columns: [
+      { id: "backlog", title: "Backlog", color: "black" },
+      { id: "design", title: "Design", color: "purple" },
+      { id: "doing", title: "Development", color: "blue" },
+      { id: "testing", title: "Testing", color: "orange" },
+      { id: "done", title: "Deployed", color: "green" },
+    ],
+  },
+  {
+    id: "bugs",
+    label: "Bug tracking",
+    description: "Reported → Confirmed → Fixing → Verified",
+    columns: [
+      { id: "reported", title: "Reported", color: "red" },
+      { id: "confirmed", title: "Confirmed", color: "orange" },
+      { id: "doing", title: "Fixing", color: "blue" },
+      { id: "done", title: "Verified", color: "green" },
+    ],
+  },
+];
