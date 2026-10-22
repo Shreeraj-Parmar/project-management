@@ -1,29 +1,57 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Files, Upload, Download, Trash2, FolderOpen, Folder, FileText, FileImage, FileArchive, FileCode, File, AlertTriangle, ChevronRight, Pencil } from "lucide-react";
-import { api, cn, formatBytes, formatDate, useFetch } from "@/lib/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Files, FolderPlus, LayoutGrid, List, Upload } from "lucide-react";
+import { api, cn } from "@/lib/client";
+import { formatBytes } from "@/lib/client";
 import { MODULES } from "@/lib/constants";
 import type { FileItem } from "@/lib/types";
 import { useProject } from "@/components/project/ProjectContext";
-import { ModuleHeader, Spinner, ErrorBox, EmptyState } from "@/components/ui/Misc";
-import { Button, IconButton } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/Confirm";
-import { Input } from "@/components/ui/Field";
-import { useToast } from "@/components/ui/Toast";
+import { Breadcrumbs, Button, ConfirmDialog, ErrorBox, Field, IconButton, Input, Modal, PageHeader, SearchInput, SectionMessage, useToast } from "@/components/ui";
+import { FileGrid, FileTable, type FileActions, type FolderEntry } from "@/components/files/FileViews";
+import { FilesEmpty, FilesNoMatch, FilesSkeleton } from "@/components/files/FileStates";
+import { UploadQueue, type UploadJob } from "@/components/files/UploadQueue";
+import { useFileUrl, kindOf } from "@/components/files/utils";
+import { useFetch } from "@/lib/client";
 
 const MOD = MODULES.find((m) => m.id === "files")!;
 type Resp = { configured: boolean; files: FileItem[] };
-type UploadState = { name: string; progress: number; error?: string };
+type View = "list" | "grid";
+const VIEW_KEY = "devboard.files.view";
 
-function iconFor(f: FileItem) {
-  const t = f.contentType;
-  const n = f.name.toLowerCase();
-  if (t.startsWith("image/")) return <FileImage size={18} className="text-[#ae4787]" />;
-  if (/zip|tar|gzip|rar|7z/.test(t) || /\.(zip|tar|gz|rar|7z)$/.test(n)) return <FileArchive size={18} className="text-[#946f00]" />;
-  if (/json|javascript|typescript|xml|yaml|html|css/.test(t) || /\.(js|ts|tsx|jsx|json|yml|yaml|env|sh|py|go|rs|sql)$/.test(n)) return <FileCode size={18} className="text-[#1f845a]" />;
-  if (/pdf|text|document|sheet|presentation/.test(t) || /\.(pdf|md|txt|docx?|xlsx?|csv)$/.test(n)) return <FileText size={18} className="text-[#0c66e4]" />;
-  return <File size={18} className="text-ink-muted" />;
+function Preview({ file, base, onClose, onDownload }: { file: FileItem | null; base: string; onClose: () => void; onDownload: (f: FileItem) => void }) {
+  const { url, failed } = useFileUrl(base, file?._id ?? "", Boolean(file));
+  return (
+    <Modal
+      open={Boolean(file)}
+      onClose={onClose}
+      title={file?.name ?? "Preview"}
+      size="large"
+      footer={
+        <>
+          <Button variant="subtle" onClick={onClose}>
+            Close
+          </Button>
+          {file ? (
+            <Button variant="secondary" onClick={() => onDownload(file)}>
+              Download
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      <div className="flex min-h-40 items-center justify-center rounded-card bg-surface">
+        {failed ? (
+          <p className="p-6 text-body text-ink-soft">Could not load the preview.</p>
+        ) : url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={file?.name ?? ""} className="max-h-[65vh] max-w-full object-contain" />
+        ) : (
+          <div className="skeleton h-56 w-full" />
+        )}
+      </div>
+    </Modal>
+  );
 }
 
 export default function FilesPage() {
@@ -32,46 +60,79 @@ export default function FilesPage() {
   const base = `/api/projects/${project._id}/files`;
   const { data, loading, error, refetch, setData } = useFetch<Resp>(base);
   const [folder, setFolder] = useState("");
-  const [uploads, setUploads] = useState<UploadState[]>([]);
+  const [query, setQuery] = useState("");
+  const [view, setViewState] = useState<View>("list");
+  const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [deleting, setDeleting] = useState<FileItem | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const [renaming, setRenaming] = useState<FileItem | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [previewing, setPreviewing] = useState<FileItem | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+  const nextId = useRef(1);
 
-  const files = data?.files ?? [];
-  const folders = useMemo(() => {
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(VIEW_KEY);
+      if (v === "list" || v === "grid") setViewState(v);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      window.localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const configured = Boolean(data?.configured);
+  const files = useMemo(() => data?.files ?? [], [data]);
+  const totalSize = files.reduce((a, f) => a + f.size, 0);
+  const q = query.trim().toLowerCase();
+
+  const folders = useMemo<FolderEntry[]>(() => {
     const set = new Set<string>();
     files.forEach((f) => {
       if (!f.folder) return;
       if (!folder) set.add(f.folder.split("/")[0]);
       else if (f.folder.startsWith(folder + "/")) set.add(f.folder.slice(folder.length + 1).split("/")[0]);
     });
-    return [...set].sort();
+    return [...set]
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => {
+        const path = folder ? `${folder}/${name}` : name;
+        return { name, path, count: files.filter((x) => x.folder === path || x.folder.startsWith(path + "/")).length };
+      });
   }, [files, folder]);
-  const list = files.filter((f) => f.folder === folder);
-  const totalSize = files.reduce((a, f) => a + f.size, 0);
+  const here = useMemo(() => files.filter((f) => f.folder === folder), [files, folder]);
+  const shownFolders = q ? folders.filter((d) => d.name.toLowerCase().includes(q)) : folders;
+  const shownFiles = q ? here.filter((f) => f.name.toLowerCase().includes(q)) : here;
+  const isEmpty = folders.length === 0 && here.length === 0;
 
-  async function uploadFiles(fileList: FileList | File[]) {
-    const arr = Array.from(fileList);
-    for (const file of arr) {
-      const state: UploadState = { name: file.name, progress: 0 };
-      setUploads((u) => [...u, state]);
+  const patchJob = useCallback((id: number, patch: Partial<UploadJob>) => setJobs((j) => j.map((x) => (x.id === id ? { ...x, ...patch } : x))), []);
+
+  const runUpload = useCallback(
+    async (job: UploadJob) => {
+      const { file, folder: dir, id } = job;
+      patchJob(id, { status: "uploading", progress: 0, error: undefined });
       try {
         const { file: rec, uploadUrl } = await api.post<{ file: FileItem; uploadUrl: string }>(base, {
           name: file.name,
           size: file.size,
           contentType: file.type || "application/octet-stream",
-          folder,
+          folder: dir,
         });
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open("PUT", uploadUrl);
           xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
           xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              const pct = Math.round((e.loaded / e.total) * 100);
-              setUploads((u) => u.map((x) => (x === state ? { ...x, progress: pct } : x)));
-            }
+            if (e.lengthComputable) patchJob(id, { progress: Math.round((e.loaded / e.total) * 100) });
           };
           xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`S3 upload failed (${xhr.status}). Check bucket CORS.`)));
           xhr.onerror = () => reject(new Error("Network error uploading to S3. Check the bucket CORS configuration."));
@@ -79,14 +140,24 @@ export default function FilesPage() {
         });
         const saved = await api.patch<FileItem>(`${base}/${rec._id}`, { status: "uploaded", size: file.size });
         setData((prev) => (prev ? { ...prev, files: [saved, ...prev.files] } : prev));
-        setUploads((u) => u.filter((x) => x !== state));
+        patchJob(id, { status: "done", progress: 100 });
         refetchProject(true);
+        setTimeout(() => setJobs((j) => j.filter((x) => x.id !== id || x.status !== "done")), 4000);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Upload failed";
-        setUploads((u) => u.map((x) => (x === state ? { ...x, error: msg } : x)));
+        patchJob(id, { status: "error", error: msg });
         toast(msg, "error");
       }
-    }
+    },
+    [base, patchJob, refetchProject, setData, toast]
+  );
+
+  async function uploadFiles(list: FileList | File[]) {
+    if (!configured) return;
+    const batch: UploadJob[] = Array.from(list).map((file) => ({ id: nextId.current++, file, folder, progress: 0, status: "uploading" }));
+    if (!batch.length) return;
+    setJobs((j) => [...j, ...batch]);
+    for (const job of batch) await runUpload(job);
   }
 
   async function download(f: FileItem) {
@@ -102,64 +173,113 @@ export default function FilesPage() {
     await api.del(`${base}/${f._id}`);
     setData((prev) => (prev ? { ...prev, files: prev.files.filter((x) => x._id !== f._id) } : prev));
     refetchProject(true);
-    toast("File deleted", "success");
+    toast(`Deleted ${f.name}.`, "success");
   }
 
-  async function rename(f: FileItem) {
-    const name = prompt("Rename file", f.name);
-    if (!name || name === f.name) return;
-    const saved = await api.patch<FileItem>(`${base}/${f._id}`, { name });
-    setData((prev) => (prev ? { ...prev, files: prev.files.map((x) => (x._id === f._id ? saved : x)) } : prev));
+  async function submitRename() {
+    const f = renaming;
+    const name = renameValue.trim();
+    if (!f || !name || name === f.name) return setRenaming(null);
+    try {
+      const saved = await api.patch<FileItem>(`${base}/${f._id}`, { name });
+      setData((prev) => (prev ? { ...prev, files: prev.files.map((x) => (x._id === f._id ? saved : x)) } : prev));
+      setRenaming(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Rename failed", "error");
+    }
   }
+
+  const actions: FileActions = {
+    open: (f) => (kindOf(f) === "image" ? setPreviewing(f) : download(f)),
+    preview: setPreviewing,
+    download,
+    rename: (f) => {
+      setRenaming(f);
+      setRenameValue(f.name);
+    },
+    remove: setDeleting,
+  };
 
   const crumbs = folder ? folder.split("/") : [];
+  const go = (path: string) => {
+    setFolder(path);
+    setQuery("");
+  };
+  const breadcrumbItems = [
+    { label: project.name, onClick: () => go("") },
+    ...crumbs.map((c, i) => ({ label: c, onClick: () => go(crumbs.slice(0, i + 1).join("/")) })),
+  ];
+
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <ModuleHeader
+    <div
+      className="relative"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(e) => hasFiles(e) && e.preventDefault()}
+      onDragLeave={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        if (configured && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+      }}
+    >
+      <PageHeader
         title="Files"
         description={`Stored in your AWS S3 bucket. ${files.length} file${files.length === 1 ? "" : "s"} · ${formatBytes(totalSize)}`}
         color={MOD.color}
         icon={<Files size={20} />}
         actions={
           <>
-            <Button variant="secondary" icon={<Folder size={15} />} onClick={() => setNewFolder("")}>
+            <Button variant="secondary" icon={<FolderPlus size={16} />} onClick={() => setNewFolder("")}>
               New folder
             </Button>
-            <Button color={MOD.color} icon={<Upload size={15} />} onClick={() => inputRef.current?.click()} disabled={data ? !data.configured : true}>
+            <Button icon={<Upload size={16} />} onClick={() => inputRef.current?.click()} disabled={!configured}>
               Upload
             </Button>
-            <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) uploadFiles(Array.from(e.target.files));
+                e.target.value = "";
+              }}
+            />
           </>
         }
       />
 
       {data && !data.configured ? (
-        <div className="mb-4 flex gap-2 rounded-lg border border-[#fedec8] bg-[#fff3eb] p-3 text-[13px] text-[#5f3811]">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-          <div>
-            <b>AWS S3 is not configured.</b> Add <span className="mono">AWS_REGION</span>, <span className="mono">AWS_ACCESS_KEY_ID</span>, <span className="mono">AWS_SECRET_ACCESS_KEY</span> and{" "}
-            <span className="mono">AWS_S3_BUCKET</span> to your .env, and allow <span className="mono">PUT</span> from this origin in the bucket CORS policy.
-          </div>
-        </div>
+        <SectionMessage appearance="warning" title="AWS S3 is not configured" className="mb-4">
+          Add <span className="mono">AWS_REGION</span>, <span className="mono">AWS_ACCESS_KEY_ID</span>, <span className="mono">AWS_SECRET_ACCESS_KEY</span> and <span className="mono">AWS_S3_BUCKET</span> to your .env, and allow{" "}
+          <span className="mono">PUT</span> from this origin in the bucket CORS policy.
+        </SectionMessage>
       ) : null}
 
-      {/* Breadcrumbs */}
-      <div className="mb-3 flex items-center gap-1 text-sm">
-        <button onClick={() => setFolder("")} className={cn("flex items-center gap-1 rounded px-2 py-1 font-semibold hover:bg-[#091e420f]", !folder && "text-ink")} style={!folder ? undefined : { color: MOD.color }}>
-          <FolderOpen size={15} /> {project.name}
-        </button>
-        {crumbs.map((c, i) => {
-          const path = crumbs.slice(0, i + 1).join("/");
-          return (
-            <span key={path} className="flex items-center gap-1">
-              <ChevronRight size={14} className="text-ink-muted" />
-              <button onClick={() => setFolder(path)} className={cn("rounded px-2 py-1 font-semibold hover:bg-[#091e420f]", i === crumbs.length - 1 && "text-ink")} style={i === crumbs.length - 1 ? undefined : { color: MOD.color }}>
-                {c}
-              </button>
-            </span>
-          );
-        })}
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Breadcrumbs items={breadcrumbItems} className="mr-auto" />
+        <SearchInput value={query} onValueChange={setQuery} placeholder="Search files" className="w-full sm:w-64" />
+        <div role="group" aria-label="View" className="flex gap-0.5 rounded-control bg-fill p-0.5">
+          <IconButton size="sm" title="List view" active={view === "list"} onClick={() => setView("list")}>
+            <List size={16} />
+          </IconButton>
+          <IconButton size="sm" title="Grid view" active={view === "grid"} onClick={() => setView("grid")}>
+            <LayoutGrid size={16} />
+          </IconButton>
+        </div>
       </div>
 
       {newFolder !== null ? (
@@ -168,137 +288,95 @@ export default function FilesPage() {
             e.preventDefault();
             const name = newFolder.trim().replace(/[\/\\]+/g, "-");
             if (!name) return;
-            setFolder(folder ? `${folder}/${name}` : name);
+            go(folder ? `${folder}/${name}` : name);
             setNewFolder(null);
             toast("Folder opened. Upload a file to keep it.", "info");
           }}
-          className="mb-3 flex items-center gap-2"
+          className="mb-4 flex flex-wrap items-center gap-2 rounded-card border border-line bg-surface p-2"
         >
-          <Folder size={16} className="text-ink-muted" />
-          <Input autoFocus value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="Folder name" className="h-9 w-64" onKeyDown={(e) => e.key === "Escape" && setNewFolder(null)} />
-          <Button type="submit" size="sm" color={MOD.color}>
-            Open
+          <Input size="sm" autoFocus aria-label="Folder name" value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="Folder name" className="w-full sm:w-64" onKeyDown={(e) => e.key === "Escape" && setNewFolder(null)} />
+          <Button type="submit" size="md" disabled={!newFolder.trim()}>
+            Create folder
           </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setNewFolder(null)}>
+          <Button type="button" size="md" variant="subtle" onClick={() => setNewFolder(null)}>
             Cancel
           </Button>
         </form>
       ) : null}
 
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          if (data?.configured && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
-        }}
-        className={cn("rounded-xl transition", dragOver && "ring-2 ring-offset-2")}
-        style={dragOver ? { boxShadow: `0 0 0 2px ${MOD.color}` } : undefined}
-      >
-        {uploads.length > 0 ? (
-          <div className="mb-3 space-y-2">
-            {uploads.map((u, i) => (
-              <div key={i} className="t-card flex items-center gap-3 p-3 text-sm">
-                <Upload size={16} className={u.error ? "text-danger" : "text-ink-muted"} />
-                <span className="truncate">{u.name}</span>
-                {u.error ? (
-                  <span className="ml-auto text-xs text-danger">{u.error}</span>
-                ) : (
-                  <>
-                    <div className="ml-auto h-1.5 w-40 overflow-hidden rounded bg-[#091e4224]">
-                      <div className="h-full transition-all" style={{ width: `${u.progress}%`, background: MOD.color }} />
-                    </div>
-                    <span className="w-10 text-right text-xs text-ink-muted">{u.progress}%</span>
-                  </>
-                )}
-                {u.error ? (
-                  <button onClick={() => setUploads((x) => x.filter((_, j) => j !== i))} className="text-xs underline">
-                    dismiss
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
+      {loading && !data ? (
+        <FilesSkeleton grid={view === "grid"} />
+      ) : error ? (
+        <ErrorBox message={error} onRetry={() => refetch()} />
+      ) : isEmpty ? (
+        <FilesEmpty folder={Boolean(folder)} configured={configured} onChoose={() => inputRef.current?.click()} />
+      ) : shownFolders.length === 0 && shownFiles.length === 0 ? (
+        <FilesNoMatch query={query} onClear={() => setQuery("")} />
+      ) : view === "grid" ? (
+        <FileGrid folders={shownFolders} files={shownFiles} base={base} actions={actions} onOpenFolder={go} />
+      ) : (
+        <FileTable folders={shownFolders} files={shownFiles} actions={actions} onOpenFolder={go} />
+      )}
 
-        {loading && !data ? (
-          <Spinner />
-        ) : error ? (
-          <ErrorBox message={error} onRetry={() => refetch()} />
-        ) : folders.length === 0 && list.length === 0 ? (
-          <EmptyState
-            icon={<Upload size={22} />}
-            color={MOD.color}
-            title={folder ? "This folder is empty" : "No files yet"}
-            description="Drag & drop files here or click Upload. Files go straight to your S3 bucket via a presigned URL."
-            action={
-              data?.configured ? (
-                <Button color={MOD.color} onClick={() => inputRef.current?.click()}>
-                  Choose files
-                </Button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <div className="t-card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-[#f7f8f9] text-left text-xs font-bold uppercase tracking-wide text-ink-muted">
-                <tr>
-                  <th className="px-4 py-2.5">Name</th>
-                  <th className="hidden px-4 py-2.5 sm:table-cell">Size</th>
-                  <th className="hidden px-4 py-2.5 md:table-cell">Uploaded</th>
-                  <th className="px-4 py-2.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {folders.map((f) => (
-                  <tr key={"dir:" + f} onClick={() => setFolder(folder ? `${folder}/${f}` : f)} className="cursor-pointer hover:bg-[#f7f8f9]">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2 font-medium text-ink">
-                        <Folder size={18} fill="#fea362" className="text-[#c25100]" /> {f}
-                      </div>
-                    </td>
-                    <td className="hidden px-4 py-2.5 text-ink-muted sm:table-cell">{files.filter((x) => x.folder === (folder ? `${folder}/${f}` : f) || x.folder.startsWith((folder ? `${folder}/${f}` : f) + "/")).length} items</td>
-                    <td className="hidden px-4 py-2.5 md:table-cell" />
-                    <td />
-                  </tr>
-                ))}
-                {list.map((f) => (
-                  <tr key={f._id} className="group hover:bg-[#f7f8f9]">
-                    <td className="px-4 py-2.5">
-                      <button onClick={() => download(f)} className="flex items-center gap-2 text-left font-medium text-ink hover:text-brand">
-                        {iconFor(f)} <span className="truncate">{f.name}</span>
-                      </button>
-                    </td>
-                    <td className="hidden px-4 py-2.5 text-ink-muted sm:table-cell">{formatBytes(f.size)}</td>
-                    <td className="hidden px-4 py-2.5 text-ink-muted md:table-cell">{formatDate(f.createdAt)}</td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-end gap-0.5 opacity-60 group-hover:opacity-100">
-                        <IconButton title="Download" onClick={() => download(f)}>
-                          <Download size={15} />
-                        </IconButton>
-                        <IconButton title="Rename" onClick={() => rename(f)}>
-                          <Pencil size={15} />
-                        </IconButton>
-                        <IconButton title="Delete" onClick={() => setDeleting(f)} className="hover:!text-danger">
-                          <Trash2 size={15} />
-                        </IconButton>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div
+        aria-hidden={!dragging}
+        className={cn("pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-card border-2 border-dashed border-brand bg-brand-soft/90 transition-opacity", dragging ? "opacity-100" : "opacity-0 invisible")}
+      >
+        <div className="flex flex-col items-center gap-2 text-brand-dark">
+          <Upload size={32} />
+          <p className="text-h-s font-semibold">{configured ? "Drop files to upload" : "S3 is not configured"}</p>
+        </div>
       </div>
 
-      <ConfirmDialog open={Boolean(deleting)} onClose={() => setDeleting(null)} onConfirm={() => deleting && remove(deleting)} title={`Delete "${deleting?.name}"?`} message="The file will be removed from S3 as well." />
+      <UploadQueue
+        jobs={jobs}
+        onRetry={(id) => {
+          const j = jobs.find((x) => x.id === id);
+          if (j) runUpload(j);
+        }}
+        onDismiss={(id) => setJobs((j) => j.filter((x) => x.id !== id))}
+        onClear={() => setJobs((j) => j.filter((x) => x.status === "uploading"))}
+      />
+
+      <Preview file={previewing} base={base} onClose={() => setPreviewing(null)} onDownload={download} />
+
+      <Modal
+        open={Boolean(renaming)}
+        onClose={() => setRenaming(null)}
+        title="Rename file"
+        size="small"
+        footer={
+          <>
+            <Button variant="subtle" onClick={() => setRenaming(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="rename-file" disabled={!renameValue.trim()}>
+              Rename
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="rename-file"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitRename();
+          }}
+        >
+          <Field label="File name">
+            <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} data-autofocus />
+          </Field>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => deleting && remove(deleting)}
+        title={`Delete ${deleting?.name ?? "file"}?`}
+        message="The file will be removed from S3 as well. This cannot be undone."
+        confirmLabel="Delete file"
+      />
     </div>
   );
 }
