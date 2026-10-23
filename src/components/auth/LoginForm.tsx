@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { Button, Field, IconButton, Input, Logo, SectionMessage } from "@/components/ui";
+import { safeNextPath } from "@/lib/redirect";
 
 type Status = { passwordConfigured: boolean; sessionSecretConfigured: boolean; mongoConfigured: boolean };
 
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/boards";
+  const next = safeNextPath(params.get("next"));
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [caps, setCaps] = useState(false);

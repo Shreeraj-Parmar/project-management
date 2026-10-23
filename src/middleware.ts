@@ -33,7 +33,7 @@ export async function middleware(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const url = new URL("/login", req.url);
-    if (pathname !== "/") url.searchParams.set("next", pathname);
+    if (pathname === "/boards" || pathname.startsWith("/boards/")) url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
   return NextResponse.next();
