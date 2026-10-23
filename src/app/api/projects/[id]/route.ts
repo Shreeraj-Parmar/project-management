@@ -1,4 +1,5 @@
 import { Project, Task, EnvVar, Password, FileItem, Note, Expense } from "@/models";
+import { isValidBoardBackground } from "@/lib/constants";
 import { ok, fail, withDB, readJson, isValidId, type Params } from "@/lib/api-helpers";
 import { encrypt } from "@/lib/crypto";
 
@@ -52,6 +53,7 @@ export const PATCH = withDB<Ctx>(async (req, { params }) => {
   const update: Record<string, unknown> = {};
   for (const k of allowed) if (k in body) update[k] = body[k];
   if (typeof update.name === "string" && !update.name.trim()) return fail("Name cannot be empty");
+  if ("color" in update && !isValidBoardBackground(update.color)) return fail("Invalid background");
 
   if (body.git && typeof body.git === "object") {
     const g = body.git as { repo?: string; token?: string };

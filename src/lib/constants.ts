@@ -12,8 +12,70 @@ export const BOARD_COLORS: { id: string; label: string; css: string }[] = [
   { id: "coral", label: "Coral", css: "linear-gradient(135deg,#c9372c 0%,#fd9891 100%)" },
 ];
 
+/** Built-in demo photos/illustrations shipped in /public/backgrounds. Stored on a board as "img:<id>". */
+export const BOARD_IMAGES: { id: string; label: string; src: string; light: boolean; fallback: string }[] = [
+  { id: "clouds", label: "Clouds", src: "/backgrounds/clouds.svg", light: true, fallback: "#cfe6ff" },
+  { id: "mint-waves", label: "Mint waves", src: "/backgrounds/mint-waves.svg", light: true, fallback: "#c8f1de" },
+  { id: "peach-dunes", label: "Peach dunes", src: "/backgrounds/peach-dunes.svg", light: true, fallback: "#ffd9c2" },
+  { id: "lavender-hills", label: "Lavender hills", src: "/backgrounds/lavender-hills.svg", light: true, fallback: "#ddd6ff" },
+  { id: "paper", label: "Paper", src: "/backgrounds/paper.svg", light: true, fallback: "#f7f8f9" },
+  { id: "sunrise", label: "Sunrise", src: "/backgrounds/sunrise.svg", light: true, fallback: "#ffe8d6" },
+  { id: "night-mountains", label: "Night mountains", src: "/backgrounds/night-mountains.svg", light: false, fallback: "#1d2b4f" },
+  { id: "aurora", label: "Aurora", src: "/backgrounds/aurora.svg", light: false, fallback: "#0c2a3a" },
+  { id: "deep-sea", label: "Deep sea", src: "/backgrounds/deep-sea.svg", light: false, fallback: "#0a3d62" },
+  { id: "dusk-city", label: "Dusk city", src: "/backgrounds/dusk-city.svg", light: false, fallback: "#3b2667" },
+];
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+const MAX_CUSTOM_IMAGE = 1_500_000; // ~1.1 MB image as a data URL
+
+/**
+ * A board's `color` field holds one of:
+ *  - a preset gradient id ("ocean")
+ *  - a solid color "#rrggbb" (color picker)
+ *  - a built-in image "img:<id>"
+ *  - a custom image "url:<https url | data:image/... URL>"
+ */
+export function isValidBoardBackground(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  if (BOARD_COLORS.some((c) => c.id === v)) return true;
+  if (HEX_RE.test(v)) return true;
+  if (v.startsWith("img:")) return BOARD_IMAGES.some((i) => i.id === v.slice(4));
+  if (v.startsWith("url:")) {
+    const u = v.slice(4);
+    if (u.length > MAX_CUSTOM_IMAGE) return false;
+    return /^https?:\/\/[^\s"'()]+$/i.test(u) || /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u);
+  }
+  return false;
+}
+
+function cssUrl(u: string): string {
+  return `url("${u.replace(/["\\\n\r]/g, "")}")`;
+}
+
+/** CSS `background` shorthand for any board background value. */
 export function boardBackground(id: string): string {
-  return BOARD_COLORS.find((c) => c.id === id)?.css ?? BOARD_COLORS[0].css;
+  const preset = BOARD_COLORS.find((c) => c.id === id);
+  if (preset) return preset.css;
+  if (typeof id === "string" && HEX_RE.test(id)) return id;
+  if (typeof id === "string" && id.startsWith("img:")) {
+    const img = BOARD_IMAGES.find((i) => i.id === id.slice(4));
+    if (img) return `${img.fallback} ${cssUrl(img.src)} center / cover no-repeat`;
+  }
+  if (typeof id === "string" && id.startsWith("url:") && isValidBoardBackground(id)) {
+    return `#44546f ${cssUrl(id.slice(4))} center / cover no-repeat`;
+  }
+  return BOARD_COLORS[0].css;
+}
+
+/** Human label for the current background (menu summary). */
+export function boardBackgroundLabel(id: string): string {
+  const preset = BOARD_COLORS.find((c) => c.id === id);
+  if (preset) return preset.label;
+  if (HEX_RE.test(id)) return `Custom color ${id.toUpperCase()}`;
+  if (id.startsWith("img:")) return BOARD_IMAGES.find((i) => i.id === id.slice(4))?.label ?? "Image";
+  if (id.startsWith("url:")) return "Custom image";
+  return BOARD_COLORS[0].label;
 }
 
 /**

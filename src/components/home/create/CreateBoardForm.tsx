@@ -4,7 +4,13 @@ import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { api, cn } from "@/lib/client";
-import { BOARD_COLORS, BOARD_TEMPLATES } from "@/lib/constants";
+import { BOARD_COLORS, BOARD_IMAGES, BOARD_TEMPLATES, boardBackground } from "@/lib/constants";
+
+/** Trello shows photos first, then colors. */
+const BG_OPTIONS = [
+  ...BOARD_IMAGES.slice(0, 5).map((i) => ({ id: `img:${i.id}`, label: i.label })),
+  ...BOARD_COLORS.map((c) => ({ id: c.id, label: c.label })),
+];
 import type { Project } from "@/lib/types";
 import { Button, Field, Input, SectionMessage, TagInput, Textarea, useToast } from "@/components/ui";
 import { recordBoardVisit } from "../recent";
@@ -53,7 +59,7 @@ export function CreateBoardForm({
 
   const [name, setName] = useState("");
   const [touched, setTouched] = useState(false);
-  const [color, setColor] = useState(BOARD_COLORS.some((c) => c.id === initialColor) ? (initialColor as string) : BOARD_COLORS[0].id);
+  const [color, setColor] = useState(BG_OPTIONS.some((c) => c.id === initialColor) ? (initialColor as string) : BOARD_COLORS[0].id);
   const [template, setTemplate] = useState(BOARD_TEMPLATES.some((t) => t.id === initialTemplate) ? (initialTemplate as string) : BOARD_TEMPLATES[0].id);
   const [more, setMore] = useState(false);
   const [description, setDescription] = useState("");
@@ -66,9 +72,9 @@ export function CreateBoardForm({
   const invalid = !!titleError;
   const tpl = BOARD_TEMPLATES.find((t) => t.id === template) ?? BOARD_TEMPLATES[0];
 
-  const colorIndex = Math.max(0, BOARD_COLORS.findIndex((c) => c.id === color));
+  const colorIndex = Math.max(0, BG_OPTIONS.findIndex((c) => c.id === color));
   const tplIndex = Math.max(0, BOARD_TEMPLATES.findIndex((t) => t.id === template));
-  const colorKeys = useRadioKeys(BOARD_COLORS.length, colorIndex, (i) => setColor(BOARD_COLORS[i].id));
+  const colorKeys = useRadioKeys(BG_OPTIONS.length, colorIndex, (i) => setColor(BG_OPTIONS[i].id));
   const tplKeys = useRadioKeys(BOARD_TEMPLATES.length, tplIndex, (i) => setTemplate(BOARD_TEMPLATES[i].id));
 
   async function submit(e: React.FormEvent) {
@@ -107,7 +113,7 @@ export function CreateBoardForm({
           Background
         </div>
         <div role="radiogroup" aria-labelledby={bgLabelId} onKeyDown={colorKeys.onKeyDown} className="grid grid-cols-5 gap-2 p-1">
-          {BOARD_COLORS.map((c, i) => {
+          {BG_OPTIONS.map((c, i) => {
             const on = c.id === color;
             return (
               <button
@@ -123,7 +129,7 @@ export function CreateBoardForm({
                 tabIndex={on ? 0 : -1}
                 onClick={() => setColor(c.id)}
                 className={cn("relative flex h-8 items-center justify-center rounded-control text-white transition-[filter] hover:brightness-90", on && "ring-2 ring-brand ring-offset-2")}
-                style={{ background: c.css }}
+                style={{ background: boardBackground(c.id) }}
               >
                 {on ? (
                   <span className="flex h-4 w-4 items-center justify-center rounded-full bg-black/45">

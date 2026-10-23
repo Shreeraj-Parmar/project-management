@@ -1,6 +1,6 @@
 import { Project, Task, Expense } from "@/models";
 import { ok, fail, withDB, readJson } from "@/lib/api-helpers";
-import { BOARD_COLORS, BOARD_TEMPLATES, LABEL_COLORS } from "@/lib/constants";
+import { BOARD_COLORS, BOARD_TEMPLATES, LABEL_COLORS, isValidBoardBackground } from "@/lib/constants";
 
 type ColumnInput = { id?: unknown; title?: unknown; color?: unknown };
 
@@ -58,7 +58,7 @@ export const POST = withDB(async (req) => {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return fail("Board title is required");
   if (name.length > 120) return fail("Board title is too long (max 120 characters)");
-  const color = BOARD_COLORS.some((c) => c.id === body.color) ? (body.color as string) : BOARD_COLORS[0].id;
+  const color = isValidBoardBackground(body.color) ? body.color : BOARD_COLORS[0].id;
   const tags = Array.isArray(body.tags)
     ? Array.from(new Set(body.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean))).slice(0, 20)
     : [];

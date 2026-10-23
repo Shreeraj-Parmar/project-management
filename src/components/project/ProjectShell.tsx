@@ -35,7 +35,7 @@ const isTyping = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest
  *
  * Layout contract with the module pages:
  * - Tasks is full-bleed on the board background: the page root gets a container with a definite height (h-full).
- * - Every other module renders inside a white content sheet (max-w-page, rounded, shadow) that scrolls vertically.
+ * - Every other module renders inside a white content sheet (full width and height, rounded, shadow) that scrolls vertically.
  *   Those pages start with a PageHeader and add no outer background, padding or max width of their own.
  */
 export function ProjectShell({ children }: { children: React.ReactNode }) {
@@ -208,8 +208,8 @@ function ShellFrame({ base, pathname, children }: { base: string; pathname: stri
                 <div className="h-full">{children}</div>
               </main>
             ) : (
-              <main id="board-content" ref={contentRef} tabIndex={-1} aria-label={active.label} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 outline-none sm:p-4 lg:p-6">
-                <div className="content-sheet mx-auto w-full max-w-page p-4 sm:p-6">{children}</div>
+              <main id="board-content" ref={contentRef} tabIndex={-1} aria-label={active.label} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-2 outline-none sm:p-3">
+                <div className="content-sheet w-full flex-1 p-4 sm:p-6">{children}</div>
               </main>
             )}
           </div>
