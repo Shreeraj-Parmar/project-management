@@ -58,6 +58,8 @@ export type EnvVar = {
   hasValue: boolean;
   note: string;
   secret: boolean;
+  /** Free-form labels such as "database" or "auth". */
+  tags: string[];
   updatedAt: string;
 };
 

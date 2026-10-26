@@ -6,6 +6,7 @@ import { ENVIRONMENTS, MODULES } from "@/lib/constants";
 import type { EnvVar } from "@/lib/types";
 import { useProject } from "@/components/project/ProjectContext";
 import { Button, ConfirmDialog, ErrorBox, PageHeader, TabPanel, Tooltip, useToast } from "@/components/ui";
+import { AddVarsModal, type AddVarsPayload } from "@/components/env/AddVarsModal";
 import { EnvCards } from "@/components/env/EnvCards";
 import { EnvModal, type SavePayload } from "@/components/env/EnvModal";
 import { EnvEmpty, EnvNoMatch, EnvSkeleton } from "@/components/env/EnvStates";
@@ -14,6 +15,8 @@ import { ENV_TABS_ID, EnvTabs } from "@/components/env/EnvTabs";
 import { EnvToolbar } from "@/components/env/EnvToolbar";
 import { ImportModal } from "@/components/env/ImportModal";
 import { InlineAdd } from "@/components/env/InlineAdd";
+import { RawEditorModal } from "@/components/env/RawEditorModal";
+import { TagFilter } from "@/components/env/EnvTags";
 import { SelectionBar } from "@/components/env/SelectionBar";
 import { useEnvData, useLayoutMode, useReveal } from "@/components/env/hooks";
 import type { DraftVar, EnvController, SortState } from "@/components/env/types";
@@ -41,7 +44,10 @@ export default function EnvPage() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState>({ by: "key", dir: "asc" });
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [editing, setEditing] = useState<EnvVar | "new" | null>(null);
+  const [editing, setEditing] = useState<EnvVar | null>(null);
+  const [addVars, setAddVars] = useState<{ text: string } | null>(null);
+  const [rawOpen, setRawOpen] = useState(false);
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [importing, setImporting] = useState<{ text: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<EnvVar[] | null>(null);
   const [overwrite, setOverwrite] = useState<{ rows: EnvVar[]; target: string; conflicts: string[] } | null>(null);
@@ -58,6 +64,7 @@ export default function EnvPage() {
     setEnvState(next);
     setSelected(new Set());
     setAdding(false);
+    setTagFilter(null);
     try {
       const url = new URL(window.location.href);
       url.searchParams.set("env", next);
@@ -90,9 +97,18 @@ export default function EnvPage() {
 
   /* ---- rows ---- */
   const q = query.trim().toLowerCase();
-  const matches = useCallback((v: EnvVar) => !q || v.key.toLowerCase().includes(q) || v.note.toLowerCase().includes(q), [q]);
+  const matches = useCallback(
+    (v: EnvVar) => !q || v.key.toLowerCase().includes(q) || v.note.toLowerCase().includes(q) || (v.tags ?? []).some((t) => t.includes(q)),
+    [q],
+  );
   const envVars = useMemo(() => vars.filter((v) => v.environment === env), [vars, env]);
-  const rows = useMemo(() => sortRows(envVars.filter(matches), sort), [envVars, matches, sort]);
+  const allTags = useMemo(() => [...new Set(vars.flatMap((v) => v.tags ?? []))].sort(), [vars]);
+  const envTags = useMemo(() => [...new Set(envVars.flatMap((v) => v.tags ?? []))].sort(), [envVars]);
+  const activeTag = tagFilter && envTags.includes(tagFilter) ? tagFilter : null;
+  const rows = useMemo(
+    () => sortRows(envVars.filter((v) => matches(v) && (!activeTag || (v.tags ?? []).includes(activeTag))), sort),
+    [envVars, matches, activeTag, sort],
+  );
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     vars.forEach((v) => matches(v) && (c[v.environment] = (c[v.environment] ?? 0) + 1));
@@ -186,6 +202,27 @@ export default function EnvPage() {
     if (item) toast(`Updated ${saved.key}`, "success");
   }
 
+  async function saveMany(payload: AddVarsPayload) {
+    const created = await data.createMany(payload);
+    setAddVars(null);
+    setExtraEnvs((x) => [...x, ...payload.environments.filter((e) => !x.includes(e))]);
+    if (!payload.environments.includes(env)) setEnv(payload.environments[0]);
+    if (query) setQuery("");
+    refetchProject(true);
+    const where = payload.environments.length === 1 ? payload.environments[0] : plural(payload.environments.length, "environment");
+    toast(`Saved ${plural(payload.items.length, "variable")} to ${where}${created > payload.items.length ? ` (${created} in total)` : ""}`, "success");
+  }
+
+  async function saveRaw(set: { key: string; value: string }[], remove: string[]) {
+    await data.saveRaw(env, set, remove);
+    setRawOpen(false);
+    reveal.hideAll();
+    setSelected(new Set());
+    refetchProject(true);
+    const parts = [set.length ? `${plural(set.length, "variable")} saved` : "", remove.length ? `${remove.length} deleted` : ""].filter(Boolean);
+    toast(`${parts.join(", ")} in ${env}`, "success");
+  }
+
   async function addInline(d: DraftVar) {
     const saved = await data.create({ environment: env, key: d.key, value: d.value, note: d.note, secret: d.secret });
     if (query) setQuery("");
@@ -223,7 +260,9 @@ export default function EnvPage() {
         else (await data.fetchAll()).forEach((v) => (values[v._id] = v.value));
       }
       const results = await Promise.allSettled(
-        list.map((r) => data.create({ environment: target, key: r.key, value: r.secret ? (values[r._id] ?? "") : r.value, note: r.note, secret: r.secret })),
+        list.map((r) =>
+          data.create({ environment: target, key: r.key, value: r.secret ? (values[r._id] ?? "") : r.value, note: r.note, secret: r.secret, tags: r.tags ?? [] }),
+        ),
       );
       const ok = results.filter((r) => r.status === "fulfilled").length;
       if (ok > 0) {
@@ -280,7 +319,7 @@ export default function EnvPage() {
       if (e.key !== "n" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented || isTypingTarget(e.target)) return;
       if (document.querySelector('[aria-modal="true"], [role="dialog"], [role="menu"]')) return;
       e.preventDefault();
-      setEditing("new");
+      setAddVars({ text: "" });
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -324,7 +363,7 @@ export default function EnvPage() {
       environment={env}
       existingKeys={keySetIn(env)}
       onSubmit={addInline}
-      onImportText={(text) => setImporting({ text })}
+      onImportText={(text) => setAddVars({ text })}
     />
   ) : null;
 
@@ -345,13 +384,13 @@ export default function EnvPage() {
         color={MOD.color}
         icon={<Braces size={20} />}
         actions={
-          <Tooltip content="Add variable (N)">
+          <Tooltip content="Add one or more variables (N)">
             <Button
               variant={!loading && envVars.length === 0 && !data.error ? "secondary" : "primary"}
               icon={<Plus size={16} />}
-              onClick={() => setEditing("new")}
+              onClick={() => setAddVars({ text: "" })}
             >
-              Add variable
+              Add variables
             </Button>
           </Tooltip>
         }
@@ -383,7 +422,7 @@ export default function EnvPage() {
             {loading ? (
               <EnvSkeleton />
             ) : envVars.length === 0 ? (
-              <EnvEmpty env={env} onImport={() => setImporting({ text: "" })} onAdd={() => setEditing("new")} />
+              <EnvEmpty env={env} onImport={() => setImporting({ text: "" })} onRawEdit={() => setRawOpen(true)} onAdd={() => setAddVars({ text: "" })} />
             ) : (
               <div className="space-y-3">
                 {selectedRows.length > 0 ? (
@@ -411,17 +450,23 @@ export default function EnvPage() {
                     canRevealAll={secretRows.length > 0 && !revealAllBusy}
                     onToggleRevealAll={() => void toggleRevealAll()}
                     onImport={() => setImporting({ text: "" })}
+                    onRawEdit={() => setRawOpen(true)}
                     onExportCopy={() => void exportEnv("copy", envVars)}
                     onExportDownload={() => void exportEnv("download", envVars)}
                     canExport={envVars.length > 0}
                     compact={mode === "cards"}
                   />
                 )}
+                <TagFilter tags={envTags} value={activeTag} onChange={setTagFilter} />
                 <p className="sr-only" aria-live="polite">
                   {q ? `${plural(rows.length, "variable")} match` : ""}
                 </p>
                 {rows.length === 0 ? (
+                  activeTag && !q ? (
+                    <EnvNoMatch query={`#${activeTag}`} env={env} elsewhere={[]} onClear={() => setTagFilter(null)} onGo={setEnv} />
+                  ) : (
                   <EnvNoMatch query={query.trim()} env={env} elsewhere={elsewhere} onClear={() => setQuery("")} onGo={setEnv} />
+                  )
                 ) : mode === "cards" ? (
                   <EnvCards rows={rows} ctl={ctl} footer={addRow} label={`Variables in ${env}`} />
                 ) : (
@@ -444,15 +489,29 @@ export default function EnvPage() {
 
       {editing ? (
         <EnvModal
-          item={editing === "new" ? null : editing}
+          item={editing}
           environments={environments}
-          defaultEnv={editing === "new" ? env : editing.environment}
+          defaultEnv={editing.environment}
           keysByEnv={keysByEnv}
           loadValue={data.fetchValue}
           onSave={saveVar}
           onClose={() => setEditing(null)}
         />
       ) : null}
+
+      {addVars ? (
+        <AddVarsModal
+          environments={environments}
+          defaultEnv={env}
+          initialText={addVars.text}
+          keysIn={keySetIn}
+          knownTags={allTags}
+          onSave={saveMany}
+          onClose={() => setAddVars(null)}
+        />
+      ) : null}
+
+      {rawOpen ? <RawEditorModal environment={env} loadAll={data.fetchAll} onSave={saveRaw} onClose={() => setRawOpen(false)} /> : null}
 
       {importing ? (
         <ImportModal

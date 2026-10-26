@@ -1,11 +1,11 @@
 "use client";
 
-import { Copy, Download, Eye, EyeOff, FileDown, Loader2, Upload } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, FileCode2, FileDown, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/client";
 import { Button, Menu, MenuItem, SearchInput, Tooltip } from "@/components/ui";
 import { plural } from "./utils";
 
-/** Search on the left; Reveal all, Import and Export on the right. Replaced by the SelectionBar while rows are selected. */
+/** Search on the left; Reveal all, Raw editor, Import and Export on the right. Replaced by the SelectionBar while rows are selected. */
 export function EnvToolbar({
   query,
   onQuery,
@@ -17,6 +17,7 @@ export function EnvToolbar({
   canRevealAll,
   onToggleRevealAll,
   onImport,
+  onRawEdit,
   onExportCopy,
   onExportDownload,
   canExport,
@@ -32,10 +33,11 @@ export function EnvToolbar({
   canRevealAll: boolean;
   onToggleRevealAll: () => void;
   onImport: () => void;
+  onRawEdit: () => void;
   onExportCopy: () => void;
   onExportDownload: () => void;
   canExport: boolean;
-  /** Narrow layout: three equal text buttons on one row. */
+  /** Narrow layout: equal text buttons on one row. */
   compact?: boolean;
 }) {
   const searching = query.trim() !== "";
@@ -71,8 +73,13 @@ export function EnvToolbar({
             {revealAllOn ? "Hide all" : "Reveal all"}
           </Button>
         </Tooltip>
+        <Tooltip content="Edit every variable as plain KEY=value text">
+          <Button variant="secondary" fullWidth={compact} icon={compact ? undefined : <FileCode2 size={16} />} onClick={onRawEdit}>
+            Raw editor
+          </Button>
+        </Tooltip>
         <Button variant="secondary" fullWidth={compact} icon={compact ? undefined : <Upload size={16} />} onClick={onImport}>
-          Import .env
+          {compact ? "Import" : "Import .env"}
         </Button>
         <Menu
           width="w-64"

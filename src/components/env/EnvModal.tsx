@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
-import { Button, Field, Input, Modal, SectionMessage, Textarea, Toggle } from "@/components/ui";
+import { Button, Field, Input, Modal, SectionMessage, TagInput, Textarea, Toggle } from "@/components/ui";
 import type { EnvVar } from "@/lib/types";
 import { EnvChoiceFields, useEnvChoice } from "./EnvChoice";
 import { errMessage, normalizeKey, validateKey } from "./utils";
 
-export type SavePayload = { environment: string; key: string; value?: string; note: string; secret: boolean };
+export type SavePayload = { environment: string; key: string; value?: string; note: string; secret: boolean; tags: string[] };
 
 /**
  * Add or edit one variable in a dialog (long values, moving to another environment, visibility).
@@ -38,6 +38,7 @@ export function EnvModal({
   const [valueTouched, setValueTouched] = useState(false);
   const [note, setNote] = useState(item?.note ?? "");
   const [secret, setSecret] = useState(item?.secret ?? true);
+  const [tags, setTags] = useState<string[]>(item?.tags ?? []);
   const env = useEnvChoice(item?.environment ?? defaultEnv);
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -78,7 +79,7 @@ export function EnvModal({
     setBusy(true);
     setError(null);
     try {
-      const payload: SavePayload = { environment: target, key: key.trim(), note, secret };
+      const payload: SavePayload = { environment: target, key: key.trim(), note, secret, tags };
       if (!editing || valueState === "ready" || valueTouched) payload.value = value;
       await onSave(payload, item);
     } catch (err) {
@@ -178,6 +179,9 @@ export function EnvModal({
         ) : null}
         <Field label="Note" hint="(optional)">
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Where it comes from, who owns it" autoComplete="off" />
+        </Field>
+        <Field label="Tags" hint="(optional)" helper="What it is for, e.g. database, auth, payments.">
+          {(p) => <TagInput {...p} value={tags} onChange={(t) => setTags(t.map((x) => x.toLowerCase()))} max={10} placeholder="database" />}
         </Field>
         <Toggle label="Secret" description="Masked in the table until you reveal it." checked={secret} onCheckedChange={setSecret} />
       </form>

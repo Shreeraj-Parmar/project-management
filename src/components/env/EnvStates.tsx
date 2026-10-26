@@ -1,6 +1,6 @@
 "use client";
 
-import { Braces, SearchX, Upload, Plus } from "lucide-react";
+import { Braces, FileCode2, SearchX, Upload, Plus } from "lucide-react";
 import { MODULES } from "@/lib/constants";
 import { Button, EmptyState, Skeleton } from "@/components/ui";
 import { envLabel, plural } from "./utils";
@@ -8,21 +8,24 @@ import { envLabel, plural } from "./utils";
 const MOD = MODULES.find((m) => m.id === "env")!;
 
 /** No variables in this environment: two ways to start. */
-export function EnvEmpty({ env, onImport, onAdd }: { env: string; onImport: () => void; onAdd: () => void }) {
+export function EnvEmpty({ env, onImport, onRawEdit, onAdd }: { env: string; onImport: () => void; onRawEdit: () => void; onAdd: () => void }) {
   return (
     <div className="rounded-card border border-dashed border-border-bold/50 bg-surface/60">
       <EmptyState
         icon={<Braces size={28} />}
         color={MOD.color}
         title={`No variables for ${env}`}
-        description="Add your first variable or import an existing .env file."
+        description="Add variables, paste a whole .env into the raw editor, or import a file."
         action={
           <>
             <Button variant="secondary" icon={<Upload size={16} />} onClick={onImport}>
               Import .env
             </Button>
+            <Button variant="secondary" icon={<FileCode2 size={16} />} onClick={onRawEdit}>
+              Raw editor
+            </Button>
             <Button icon={<Plus size={16} />} onClick={onAdd}>
-              Add variable
+              Add variables
             </Button>
           </>
         }
@@ -55,7 +58,7 @@ export function EnvNoMatch({
         description={
           elsewhere.length > 0
             ? `Nothing in ${env}, but there are matches in other environments.`
-            : "Search looks at keys and notes. Values are never searched."
+            : "Search looks at keys, notes and tags. Values are never searched."
         }
         action={
           <>

@@ -8,6 +8,7 @@ const EnvVarSchema = new Schema(
     value: { type: String, default: "" }, // encrypted at rest
     note: { type: String, default: "" },
     secret: { type: Boolean, default: true },
+    tags: { type: [String], default: [] },
   },
   { timestamps: true }
 );

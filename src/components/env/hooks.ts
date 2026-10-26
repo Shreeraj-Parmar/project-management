@@ -27,7 +27,7 @@ export function useLayoutMode<T extends HTMLElement>() {
 
 /** List value as the table keeps it: secrets stay blank until revealed. */
 function normalize(v: EnvVar): EnvVar {
-  return { ...v, value: v.secret ? "" : v.value, hasValue: v.hasValue ?? Boolean(v.value) };
+  return { ...v, tags: v.tags ?? [], value: v.secret ? "" : v.value, hasValue: v.hasValue ?? Boolean(v.value) };
 }
 
 /** Data + mutations for the env routes. Every action throws on failure, the caller decides how to tell the user. */
@@ -52,12 +52,12 @@ export function useEnvData(base: string) {
   );
 
   const create = useCallback(
-    async (payload: { environment: string; key: string; value: string; note: string; secret: boolean }) => merge(await api.post<EnvVar>(base, payload)),
+    async (payload: { environment: string; key: string; value: string; note: string; secret: boolean; tags?: string[] }) => merge(await api.post<EnvVar>(base, payload)),
     [base, merge],
   );
 
   const update = useCallback(
-    async (id: string, payload: { environment?: string; key?: string; value?: string; note?: string; secret?: boolean }) =>
+    async (id: string, payload: { environment?: string; key?: string; value?: string; note?: string; secret?: boolean; tags?: string[] }) =>
       merge(await api.patch<EnvVar>(`${base}/${id}`, payload)),
     [base, merge],
   );
@@ -85,7 +85,26 @@ export function useEnvData(base: string) {
     [base, refetch],
   );
 
-  return { vars, loading: loading && !data, hasData: !!data, error, refetch, create, update, remove, fetchValue, fetchAll, importRaw };
+  /** Several keys into several environments at once (the Add variables dialog). */
+  const createMany = useCallback(
+    async (payload: { items: { key: string; value: string }[]; environments: string[]; note: string; secret: boolean; tags: string[] }) => {
+      const res = await api.post<{ created: number }>(base, payload);
+      await refetch(true);
+      return res.created;
+    },
+    [base, refetch],
+  );
+
+  /** Raw editor save: upsert `set`, delete `remove`, both in one environment. */
+  const saveRaw = useCallback(
+    async (environment: string, set: { key: string; value: string }[], remove: string[]) => {
+      await api.put(base, { environment, set, remove });
+      await refetch(true);
+    },
+    [base, refetch],
+  );
+
+  return { vars, loading: loading && !data, hasData: !!data, error, refetch, create, update, remove, fetchValue, fetchAll, importRaw, createMany, saveRaw };
 }
 
 type Entry = { value: string; at: number };

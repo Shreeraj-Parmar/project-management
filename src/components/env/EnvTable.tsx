@@ -6,6 +6,7 @@ import { cn, relativeTime } from "@/lib/client";
 import { Checkbox, IconButton, Tooltip } from "@/components/ui";
 import type { EnvVar } from "@/lib/types";
 import type { EnvController, LayoutMode, SortState } from "./types";
+import { TagChips } from "./EnvTags";
 import { RowActions } from "./RowActions";
 import { Truncate } from "./Truncate";
 import { ValueCell } from "./ValueCell";
@@ -144,6 +145,7 @@ export function EnvTable({
                 </td>
                 <td className="h-11 px-3 py-1 align-middle">
                   <KeyCell v={v} ctl={ctl} />
+                  <TagChips tags={v.tags} className="mb-0.5" />
                   {!noteColumn && v.note ? <Truncate text={v.note} className="text-body-sm text-ink-muted" /> : null}
                 </td>
                 <td className="h-11 px-3 py-1 align-middle">

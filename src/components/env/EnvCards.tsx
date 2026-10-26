@@ -5,6 +5,7 @@ import { cn, relativeTime } from "@/lib/client";
 import { Checkbox } from "@/components/ui";
 import type { EnvVar } from "@/lib/types";
 import type { EnvController } from "./types";
+import { TagChips } from "./EnvTags";
 import { RowActions, RowMenu } from "./RowActions";
 import { ValueCell } from "./ValueCell";
 
@@ -44,6 +45,7 @@ export function EnvCards({ rows, ctl, footer, label }: { rows: EnvVar[]; ctl: En
                 </div>
               </div>
               <div className="mt-2 pl-6">
+                <TagChips tags={v.tags} className="mb-2" />
                 <ValueCell v={v} shown={ctl.revealed[v._id]} wrap />
                 {v.note ? <p className="mt-2 break-words text-body text-ink-soft">{v.note}</p> : null}
               </div>

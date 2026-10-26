@@ -1,5 +1,6 @@
 import { ENVIRONMENTS } from "@/lib/constants";
 import { copyToClipboard } from "@/lib/client";
+import { LINE_RE, unquote } from "@/lib/dotenv";
 import type { EnvVar } from "@/lib/types";
 
 /** Fixed-length mask. Never reveals the real length of a secret. */
@@ -7,9 +8,6 @@ export const MASK = "••••••••••••";
 
 /** Values revealed in the table hide again after this long. */
 export const REVEAL_MS = 30_000;
-
-/** The line grammar of the server's bulk import (src/app/api/projects/[id]/env/route.ts). */
-const LINE_RE = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*)$/;
 
 export function normalizeKey(raw: string): string {
   return raw.toUpperCase().replace(/\s+/g, "_");
@@ -74,8 +72,7 @@ export function parseEnv(raw: string, existing: ReadonlySet<string>): ParsedEnv 
       ignored.push({ line: i + 1, text: trimmed });
       return;
     }
-    let value = m[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    const value = unquote(m[2]);
     const prev = entries.get(m[1]);
     entries.set(m[1], { key: m[1], value, line: i + 1, overwrite: existing.has(m[1]), repeated: !!prev });
   });
@@ -88,16 +85,19 @@ export function parseSingleLine(text: string): { key: string; value: string } | 
   if (!t || /\r?\n/.test(t)) return null;
   const m = t.match(LINE_RE);
   if (!m) return null;
-  let value = m[2].trim();
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-  return { key: normalizeKey(m[1]), value };
+  return { key: normalizeKey(m[1]), value: unquote(m[2]) };
+}
+
+/** One `KEY=value` line, quoting (JSON style) when the value has spaces, quotes, # or newlines. */
+export function envLine(key: string, value: string): string {
+  return `${key}=${/[\s#"']/.test(value) ? JSON.stringify(value) : value}`;
 }
 
 /** `.env` text for the given variables (values must be revealed). Notes become comments above the key. */
 export function serializeEnv(vars: Pick<EnvVar, "key" | "value" | "note">[]): string {
   if (vars.length === 0) return "";
   const body = vars
-    .map((v) => `${v.note ? `# ${v.note.replace(/\r?\n/g, " ")}\n` : ""}${v.key}=${/[\s#"']/.test(v.value) ? JSON.stringify(v.value) : v.value}`)
+    .map((v) => `${v.note ? `# ${v.note.replace(/\r?\n/g, " ")}\n` : ""}${envLine(v.key, v.value)}`)
     .join("\n");
   return body + "\n";
 }
