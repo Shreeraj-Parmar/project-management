@@ -1,6 +1,7 @@
 import { FileItem } from "@/models";
 import { ok, fail, withDB, readJson, isValidId, type Params } from "@/lib/api-helpers";
 import { deleteObject, presignDownload } from "@/lib/s3";
+import { cleanPath, ensureFolders } from "@/lib/folders";
 
 type Ctx = Params<{ id: string; fileId: string }>;
 
@@ -22,7 +23,10 @@ export const PATCH = withDB<Ctx>(async (req, { params }) => {
   const update: Record<string, unknown> = {};
   if (body.status === "uploaded") update.status = "uploaded";
   if (typeof body.name === "string" && body.name.trim()) update.name = body.name.trim();
-  if (typeof body.folder === "string") update.folder = body.folder.replace(/^\/+|\/+$/g, "");
+  if (typeof body.folder === "string") {
+    update.folder = cleanPath(body.folder);
+    if (update.folder) await ensureFolders(id, update.folder as string);
+  }
   if (typeof body.size === "number") update.size = body.size;
   const f = await FileItem.findOneAndUpdate({ _id: fileId, projectId: id }, { $set: update }, { new: true }).lean();
   if (!f) return fail("Not found", 404);

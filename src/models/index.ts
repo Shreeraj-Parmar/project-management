@@ -5,3 +5,4 @@ export { Password } from "./Password";
 export { FileItem } from "./FileItem";
 export { Note } from "./Note";
 export { Expense } from "./Expense";
+export { Folder } from "./Folder";

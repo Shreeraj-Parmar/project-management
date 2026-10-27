@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GitBranch, Link2, MoreHorizontal, RefreshCw, Unlink, ExternalLink, Pencil } from "lucide-react";
+import { AlertTriangle, GitBranch, Link2, MoreHorizontal, RefreshCw, Unlink, ExternalLink, Pencil, Star, GitFork } from "lucide-react";
 import { api, relativeTime, useFetch } from "@/lib/client";
 import { MODULES } from "@/lib/constants";
 import type { GitSnapshot } from "@/lib/github";
@@ -96,8 +96,10 @@ export default function GitPage() {
           </a>
           {data?.repo ? (
             <>
-              <Lozenge appearance="inprogress">{data.repo.defaultBranch}</Lozenge>
+              <Lozenge appearance="inprogress" icon={<GitBranch size={10} />}>{data.repo.defaultBranch}</Lozenge>
               <Lozenge appearance="default">{data.repo.private ? "Private" : "Public"}</Lozenge>
+              <span className="hidden items-center gap-1 text-body-sm text-ink-muted sm:inline-flex"><Star size={12} /> {data.repo.stars}</span>
+              <span className="hidden items-center gap-1 text-body-sm text-ink-muted sm:inline-flex"><GitFork size={12} /> {data.repo.forks}</span>
               <span className="hidden text-body-sm text-ink-muted md:inline">pushed {relativeTime(data.repo.pushedAt)}</span>
             </>
           ) : null}
@@ -130,7 +132,18 @@ export default function GitPage() {
             {err.body}
           </SectionMessage>
         ) : (
-          <RepoTabs data={data as GitSnapshot} />
+          <>
+            {data?.unavailable && Object.keys(data.unavailable).length ? (
+              <p className="flex items-start gap-2 rounded-card border border-line bg-surface px-3 py-2 text-body-sm text-ink-soft">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+                <span>
+                  Some sections couldn&apos;t be loaded from GitHub: {Object.keys(data.unavailable).join(", ")}.{" "}
+                  {data.hasToken || data.globalToken ? "The token may lack permission for them." : "Adding an access token usually fixes this."}
+                </span>
+              </p>
+            ) : null}
+            <RepoTabs data={data as GitSnapshot} />
+          </>
         )}
       </div>
     );
@@ -140,7 +153,7 @@ export default function GitPage() {
     <div>
       <PageHeader
         title="Git repository"
-        description="Connect a GitHub repo to see commits, branches, issues and pull requests right here."
+        description="Everything about the connected GitHub repository: README, commits, branches, issues, pull requests, releases and workflow runs."
         color={MOD.color}
         icon={<GitBranch size={20} />}
       />

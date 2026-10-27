@@ -4,26 +4,38 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Copy, FileCode2, RotateCcw } from "lucide-react";
 import { parseEnvText } from "@/lib/dotenv";
 import type { EnvVar } from "@/lib/types";
-import { Button, Lozenge, Modal, SectionMessage, Skeleton, Textarea } from "@/components/ui";
-import { copyText, envLine, errMessage, parseEnv, plural, validateKey } from "./utils";
+import { Button, ConfirmDialog, Field, Input, Lozenge, Modal, SectionMessage, Skeleton, Textarea } from "@/components/ui";
+import { cn } from "@/lib/client";
+import { copyText, envLabel, envLine, errMessage, normalizeEnvName, parseEnv, plural, validateKey } from "./utils";
+
+const NEW_ENV = "__new";
 
 /**
  * Railway-style raw editor: the whole environment as one KEY=value text, edited freely.
+ * Pick the environment at the top (or type a new one); saving only touches that environment.
  * Saving writes the difference: new keys are added (as secrets), changed values updated, missing keys deleted.
  * Notes, tags and visibility of keys that stay are untouched.
  */
 export function RawEditorModal({
-  environment,
+  environment: initialEnv,
+  environments,
   loadAll,
   onSave,
   onClose,
 }: {
+  /** Environment selected when the editor opens. */
   environment: string;
-  /** Decrypted variables of this environment. */
+  /** Every known environment, for the picker. */
+  environments: string[];
+  /** Decrypted variables of every environment. */
   loadAll: () => Promise<EnvVar[]>;
-  onSave: (set: { key: string; value: string }[], remove: string[]) => Promise<void>;
+  onSave: (environment: string, set: { key: string; value: string }[], remove: string[]) => Promise<void>;
   onClose: () => void;
 }) {
+  const [environment, setEnvironment] = useState(initialEnv);
+  const [choice, setChoice] = useState<string>(initialEnv);
+  const [customName, setCustomName] = useState("");
+  const [pendingEnv, setPendingEnv] = useState<string | null>(null);
   const [current, setCurrent] = useState<Map<string, string> | null>(null);
   const [initial, setInitial] = useState("");
   const [text, setText] = useState("");
@@ -36,6 +48,7 @@ export function RawEditorModal({
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
+    setCurrent(null);
     loadAll()
       .then((all) => {
         if (cancelled) return;
@@ -66,13 +79,50 @@ export function RawEditorModal({
 
   const changes = diff ? diff.added.length + diff.changed.length + diff.removed.length : 0;
   const canSave = !!diff && changes > 0 && diff.badKeys.length === 0 && !busy;
+  const dirty = current !== null && text !== initial;
+  const isNew = !environments.includes(environment);
+  const customResolved = normalizeEnvName(customName);
+  const allEnvs = environments.includes(environment) ? environments : [...environments, environment];
+
+  /** Switch the editor to another environment; unsaved edits ask first. */
+  function switchTo(next: string) {
+    if (next === environment) return;
+    if (dirty) {
+      setPendingEnv(next);
+      return;
+    }
+    setEnvironment(next);
+    setError(null);
+  }
+
+  function onPick(value: string) {
+    setChoice(value);
+    if (value === NEW_ENV) {
+      setCustomName("");
+      return;
+    }
+    switchTo(value);
+  }
+
+  // Typing a new environment name retargets the editor once the name is valid.
+  useEffect(() => {
+    if (choice !== NEW_ENV) return;
+    if (!customResolved || customResolved === environment) return;
+    if (dirty) return; // keep the text; the confirm below handles it on blur / enter
+    setEnvironment(customResolved);
+    setError(null);
+  }, [choice, customResolved, dirty, environment]);
 
   async function submit() {
     if (!diff || !canSave) return;
+    if (choice === NEW_ENV && !customResolved) {
+      setError("Give the new environment a name first.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await onSave([...diff.added, ...diff.changed], diff.removed);
+      await onSave(environment, [...diff.added, ...diff.changed], diff.removed);
     } catch (err) {
       setError(errMessage(err, "Couldn't save the changes. Try again."));
       setBusy(false);
@@ -83,8 +133,8 @@ export function RawEditorModal({
     <Modal
       open
       onClose={onClose}
-      title={`Raw editor · ${environment}`}
-      description="Edit every variable as plain KEY=value lines. Delete a line to remove that variable."
+      title="Raw editor"
+      description="Pick an environment, then edit its variables as plain KEY=value lines. Only that environment changes when you save."
       size="large"
       footer={
         <>
@@ -105,12 +155,73 @@ export function RawEditorModal({
             Cancel
           </Button>
           <Button type="button" icon={<FileCode2 size={16} />} loading={busy} disabled={!canSave} onClick={submit}>
-            {changes > 0 ? `Save ${plural(changes, "change")}` : "No changes"}
+            {changes > 0 ? `Save ${plural(changes, "change")} to ${environment}` : "No changes"}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
+        <div className="flex flex-wrap items-end gap-3 rounded-card border border-line bg-surface p-3">
+          <div role="radiogroup" aria-label="Environment" className="flex flex-wrap gap-1.5">
+            {allEnvs.map((e) => {
+              const on = choice !== NEW_ENV && e === environment;
+              return (
+                <button
+                  key={e}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => onPick(e)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1.5 rounded-control border px-3 text-body font-medium transition-colors",
+                    on ? "border-brand bg-brand-soft text-brand-dark" : "border-line bg-canvas text-ink-soft hover:bg-fill hover:text-ink",
+                  )}
+                >
+                  {envLabel(e)}
+                  {e === "production" ? <span className="size-1.5 rounded-full bg-danger" aria-hidden /> : null}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={choice === NEW_ENV}
+              onClick={() => onPick(NEW_ENV)}
+              className={cn(
+                "inline-flex h-8 items-center rounded-control border border-dashed px-3 text-body font-medium transition-colors",
+                choice === NEW_ENV ? "border-brand bg-brand-soft text-brand-dark" : "border-border-bold/60 text-ink-soft hover:bg-fill hover:text-ink",
+              )}
+            >
+              + Other…
+            </button>
+          </div>
+          {choice === NEW_ENV ? (
+            <Field
+              label="New environment"
+              className="w-full sm:w-64"
+              helper={customName.trim() && customResolved !== customName.trim() ? `Saved as “${customResolved}”.` : "Lowercase letters, numbers and dashes."}
+              error={customName.trim() && !customResolved ? "Use letters, numbers or dashes." : undefined}
+            >
+              <Input
+                size="sm"
+                value={customName}
+                autoFocus
+                onChange={(e) => setCustomName(e.target.value)}
+                onBlur={() => customResolved && customResolved !== environment && switchTo(customResolved)}
+                onKeyDown={(e) => e.key === "Enter" && customResolved && switchTo(customResolved)}
+                placeholder="preview"
+                maxLength={32}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+          ) : null}
+          <p className="w-full text-body-sm text-ink-muted">
+            Editing <strong className="font-semibold text-ink">{environment}</strong>
+            {isNew ? " (new, created on save)" : current ? ` · ${plural(current.size, "variable")}` : ""}
+            {environment === "production" ? ". Changes here affect your live environment." : "."}
+          </p>
+        </div>
         {error ? (
           <SectionMessage appearance="error" title="Couldn't save">
             {error}
@@ -176,6 +287,25 @@ export function RawEditorModal({
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={pendingEnv !== null}
+        onClose={() => {
+          setPendingEnv(null);
+          if (choice === NEW_ENV && !environments.includes(environment)) return;
+          setChoice(environment);
+        }}
+        onConfirm={() => {
+          if (pendingEnv !== null) {
+            setEnvironment(pendingEnv);
+            setError(null);
+          }
+          setPendingEnv(null);
+        }}
+        title={`Switch to ${pendingEnv ?? ""}?`}
+        message={`You have unsaved edits in ${environment}. Switching environments discards them.`}
+        confirmLabel="Discard and switch"
+        cancelLabel="Keep editing"
+      />
     </Modal>
   );
 }

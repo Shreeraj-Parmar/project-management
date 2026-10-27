@@ -1,4 +1,4 @@
-import { Project, Task, EnvVar, Password, FileItem, Note, Expense } from "@/models";
+import { Project, Task, EnvVar, Password, FileItem, Note, Expense, Folder } from "@/models";
 import { isValidBoardBackground } from "@/lib/constants";
 import { ok, fail, withDB, readJson, isValidId, type Params } from "@/lib/api-helpers";
 import { encrypt } from "@/lib/crypto";
@@ -76,6 +76,7 @@ export const DELETE = withDB<Ctx>(async (_req, { params }) => {
     EnvVar.deleteMany({ projectId: id }),
     Password.deleteMany({ projectId: id }),
     FileItem.deleteMany({ projectId: id }),
+    Folder.deleteMany({ projectId: id }),
     Note.deleteMany({ projectId: id }),
     Expense.deleteMany({ projectId: id }),
   ]);

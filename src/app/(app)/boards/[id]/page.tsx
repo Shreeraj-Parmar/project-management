@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   Braces,
-  CheckSquare,
   Clock,
   ExternalLink,
   GitBranch,
@@ -17,9 +16,8 @@ import {
 import { relativeTime, formatDate } from "@/lib/client";
 import { MODULES } from "@/lib/constants";
 import { useProject } from "@/components/project/ProjectContext";
-import { buttonClass, EmptyState, Lozenge, PageHeader } from "@/components/ui";
+import { buttonClass, Lozenge, PageHeader } from "@/components/ui";
 import type { LozengeAppearance } from "@/components/ui";
-import { GettingStarted } from "@/components/overview/GettingStarted";
 import { ModuleTiles } from "@/components/overview/ModuleTiles";
 import { RecentNotes, RecentTasks } from "@/components/overview/RecentPanels";
 
@@ -36,53 +34,6 @@ export default function OverviewPage() {
   const s = project.stats;
   const base = `/boards/${project._id}`;
   const st = STATUS[project.status] ?? STATUS.active;
-  const empty =
-    s.tasks + s.env + s.passwords + s.files + s.notes + s.expenses === 0;
-
-  const steps = [
-    {
-      id: "tasks",
-      label: "Add your first task",
-      hint: "Plan work as cards on the board",
-      done: s.tasks > 0,
-      href: `${base}/tasks`,
-    },
-    {
-      id: "env",
-      label: "Store environment variables",
-      hint: "Keep .env values in one place",
-      done: s.env > 0,
-      href: `${base}/env`,
-    },
-    {
-      id: "passwords",
-      label: "Save a credential",
-      hint: "Logins, API keys and tokens",
-      done: s.passwords > 0,
-      href: `${base}/passwords`,
-    },
-    {
-      id: "notes",
-      label: "Write a note",
-      hint: "Decisions, snippets, links",
-      done: s.notes > 0,
-      href: `${base}/notes`,
-    },
-    {
-      id: "files",
-      label: "Upload a file",
-      hint: "Attach assets and documents",
-      done: s.files > 0,
-      href: `${base}/files`,
-    },
-    {
-      id: "git",
-      label: "Connect a Git repository",
-      hint: "See commits and pull requests",
-      done: !!project.git?.repo,
-      href: `${base}/git`,
-    },
-  ];
 
   const actions = [
     { label: "New task", icon: <Plus size={16} />, href: `${base}/tasks` },
@@ -150,27 +101,6 @@ export default function OverviewPage() {
       />
 
       <div className="space-y-6">
-        {empty ? (
-          <section className="t-card t-card--static">
-            <EmptyState
-              compact
-              icon={<CheckSquare size={22} />}
-              title="This board is empty"
-              description="Start by adding a task, then store variables, credentials and notes alongside it."
-              action={
-                <Link
-                  href={`${base}/tasks`}
-                  className={buttonClass({ variant: "primary" })}
-                >
-                  <Plus size={16} aria-hidden /> Add your first task
-                </Link>
-              }
-            />
-          </section>
-        ) : null}
-
-        <GettingStarted projectId={project._id} steps={steps} />
-
         <ModuleTiles base={base} stats={s} />
 
         <div className="grid gap-4 lg:grid-cols-2">

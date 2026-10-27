@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
-import { FileItem } from "@/models";
+import { FileItem, Folder } from "@/models";
+import { ensureFolders } from "@/lib/folders";
 import { ok, fail, withDB, readJson, isValidId, type Params } from "@/lib/api-helpers";
 import { isS3Configured, presignUpload } from "@/lib/s3";
 
@@ -8,8 +9,11 @@ type Ctx = Params<{ id: string }>;
 export const GET = withDB<Ctx>(async (_req, { params }) => {
   const { id } = await params;
   if (!isValidId(id)) return fail("Invalid id", 404);
-  const files = await FileItem.find({ projectId: id, status: "uploaded" }).sort({ folder: 1, createdAt: -1 }).lean();
-  return ok({ configured: isS3Configured(), files });
+  const [files, folders] = await Promise.all([
+    FileItem.find({ projectId: id, status: "uploaded" }).sort({ folder: 1, createdAt: -1 }).lean(),
+    Folder.find({ projectId: id }).sort({ path: 1 }).lean(),
+  ]);
+  return ok({ configured: isS3Configured(), files, folders });
 });
 
 /** Step 1 of upload: create a pending record and return a presigned PUT url. */
@@ -32,6 +36,7 @@ export const POST = withDB<Ctx>(async (req, { params }) => {
     folder,
     status: "pending",
   });
+  if (folder) await ensureFolders(id, folder);
   const uploadUrl = await presignUpload(key, contentType);
   return ok({ file, uploadUrl }, { status: 201 });
 });

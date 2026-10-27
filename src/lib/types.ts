@@ -88,6 +88,15 @@ export type FileItem = {
   createdAt: string;
 };
 
+export type Folder = {
+  _id: string;
+  projectId: string;
+  name: string;
+  path: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Note = {
   _id: string;
   projectId: string;

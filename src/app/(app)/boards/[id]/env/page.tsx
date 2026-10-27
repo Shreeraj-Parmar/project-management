@@ -213,14 +213,16 @@ export default function EnvPage() {
     toast(`Saved ${plural(payload.items.length, "variable")} to ${where}${created > payload.items.length ? ` (${created} in total)` : ""}`, "success");
   }
 
-  async function saveRaw(set: { key: string; value: string }[], remove: string[]) {
-    await data.saveRaw(env, set, remove);
+  async function saveRaw(target: string, set: { key: string; value: string }[], remove: string[]) {
+    await data.saveRaw(target, set, remove);
     setRawOpen(false);
     reveal.hideAll();
     setSelected(new Set());
+    setExtraEnvs((x) => (x.includes(target) ? x : [...x, target]));
+    if (target !== env) setEnv(target);
     refetchProject(true);
     const parts = [set.length ? `${plural(set.length, "variable")} saved` : "", remove.length ? `${remove.length} deleted` : ""].filter(Boolean);
-    toast(`${parts.join(", ")} in ${env}`, "success");
+    toast(`${parts.join(", ")} in ${target}`, "success");
   }
 
   async function addInline(d: DraftVar) {
@@ -511,7 +513,7 @@ export default function EnvPage() {
         />
       ) : null}
 
-      {rawOpen ? <RawEditorModal environment={env} loadAll={data.fetchAll} onSave={saveRaw} onClose={() => setRawOpen(false)} /> : null}
+      {rawOpen ? <RawEditorModal environment={env} environments={environments} loadAll={data.fetchAll} onSave={saveRaw} onClose={() => setRawOpen(false)} /> : null}
 
       {importing ? (
         <ImportModal

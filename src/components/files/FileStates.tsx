@@ -50,14 +50,14 @@ export function FilesEmpty({ folder, configured, onChoose }: { folder: boolean; 
   );
 }
 
-export function FilesNoMatch({ query, onClear }: { query: string; onClear: () => void }) {
+export function FilesNoMatch({ query, onClear, elsewhere = 0 }: { query: string; onClear: () => void; elsewhere?: number }) {
   return (
     <div className="rounded-card border border-line">
       <EmptyState
         icon={<SearchX size={28} />}
         color={MOD.color}
         title={`No files match "${query}"`}
-        description="Check the spelling or search in another folder."
+        description={elsewhere > 0 ? `${elsewhere} file${elsewhere === 1 ? "" : "s"} match in other folders. Search looks inside the open folder only.` : "Check the spelling or search in another folder."}
         action={
           <Button variant="secondary" onClick={onClear}>
             Clear search
